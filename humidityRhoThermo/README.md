@@ -8,7 +8,7 @@ cd $FOAM_SRC/thermophysicalModels/basic
 •	Add the following lines after the liquidThermo.C in under Make folder in files:
 humidityRhoThermo/humidityRhoThermo.C
 humidityRhoThermo/humidityRhoThermos.C 
-humidityRhoThermo/derivedFvPatchFields/fixedHumidity/fixedHumidityFvPatchScalarField.C
+derivedFvPatchFields/fixedHumidity/fixedHumidityFvPatchScalarField.C
 
 •	Compile the thermo library and boundary condition 
 wmake libso

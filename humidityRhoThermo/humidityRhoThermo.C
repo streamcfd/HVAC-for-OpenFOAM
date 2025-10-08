@@ -132,7 +132,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:specificHumidity"),
+            phasePropertyName("specificHumidity"),
             mesh.time().timeName(),
             mesh,
             IOobject::MUST_READ,
@@ -305,7 +305,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:specificHumidity"),
+            phasePropertyName("specificHumidity"),
             mesh.time().timeName(),
             mesh,
             IOobject::MUST_READ,
@@ -479,7 +479,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:specificHumidity"),
+            phasePropertyName("specificHumidity"),
             mesh.time().timeName(),
             mesh,
             IOobject::MUST_READ,
