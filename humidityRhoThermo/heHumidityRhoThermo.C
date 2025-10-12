@@ -27,6 +27,7 @@ License
 #include "fvMatricesFwd.H"
 #include "fvCFD.H"
 #include "bound.H"
+#include "fvOptions.H"
 
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
 
@@ -458,16 +459,26 @@ specificHumidityTransport()
         gammaEff += rho*nut/turbulentSc;
     }
 
+    // Lookup fvOptions
+    const fvMesh& mesh = refCast<const fvMesh>(this->db());
+    fv::options& fvOptions(fv::options::New(mesh));
+
     fvScalarMatrix specHumEqn
     (
         fvm::ddt(rho, specHum)
       + fvm::div(phi, specHum)
      ==
         fvm::laplacian(gammaEff, specHum)
+      + fvOptions(rho, specHum)
     );
 
     specHumEqn.relax();
+
+    fvOptions.constrain(specHumEqn);
+
     specHumEqn.solve();
+
+    fvOptions.correct(specHum);
 
     //- To keep physical range
     //  Defined between 0 and max water content based on saturation pressure
