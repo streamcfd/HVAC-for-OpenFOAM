@@ -37,6 +37,9 @@ Description
 
     A feedback controller is added to adjust the heat addition based on a
     sensor point inside the domain.
+    The control mode can be "scale" (default) or "linear".
+    "scale": Qeff = Qbase*factor with gain in 1/K.
+    "linear": Qeff = Qbase - gain*err with gain in W/K (allows cooling).
 
     \heading Patch usage
 
@@ -49,7 +52,8 @@ Description
         sensorPoint | sensor point coordinate        | yes      |
         Tset        | target temperature             | yes      |
         band        | deadband                       | no       | 0
-        gain        | proportional gain              | no       | 0
+        controlMode | control mode (scale|linear)    | no       | scale
+        gain        | proportional gain (mode dep.)  | no       | 0
         rampRate    | max |dQ/dt|                    | no       | 0
         phi         | flux field name                | no       | phi
         TMin        | min temperature limit          | no       | 0.0
@@ -131,6 +135,9 @@ class outletMappedUniformInletHeatAdditionControlledFvPatchScalarField
 
         //- Deadband
         scalar band_;
+
+        //- Control mode ("scale" or "linear")
+        word controlMode_;
 
         //- Proportional gain
         scalar gain_;

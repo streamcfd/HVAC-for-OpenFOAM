@@ -49,6 +49,7 @@ outletMappedUniformInletHeatAdditionControlledFvPatchScalarField
     sensorPoint_(point(0, 0, 0)),
     Tset_(0),
     band_(0),
+    controlMode_("scale"),
     gain_(0),
     Qbase_(0),
     Qmin_(0),
@@ -80,6 +81,7 @@ outletMappedUniformInletHeatAdditionControlledFvPatchScalarField
     sensorPoint_(ptf.sensorPoint_),
     Tset_(ptf.Tset_),
     band_(ptf.band_),
+    controlMode_(ptf.controlMode_),
     gain_(ptf.gain_),
     Qbase_(ptf.Qbase_),
     Qmin_(ptf.Qmin_),
@@ -110,6 +112,7 @@ outletMappedUniformInletHeatAdditionControlledFvPatchScalarField
     sensorPoint_(dict.get<point>("sensorPoint")),
     Tset_(dict.get<scalar>("Tset")),
     band_(dict.getOrDefault<scalar>("band", 0)),
+    controlMode_(dict.getOrDefault<word>("controlMode", "scale")),
     gain_(dict.getOrDefault<scalar>("gain", 0)),
     Qbase_(dict.get<scalar>("Qbase")),
     Qmin_(dict.getOrDefault<scalar>("Qmin", 0)),
@@ -138,6 +141,7 @@ outletMappedUniformInletHeatAdditionControlledFvPatchScalarField
     sensorPoint_(ptf.sensorPoint_),
     Tset_(ptf.Tset_),
     band_(ptf.band_),
+    controlMode_(ptf.controlMode_),
     gain_(ptf.gain_),
     Qbase_(ptf.Qbase_),
     Qmin_(ptf.Qmin_),
@@ -167,6 +171,7 @@ outletMappedUniformInletHeatAdditionControlledFvPatchScalarField
     sensorPoint_(ptf.sensorPoint_),
     Tset_(ptf.Tset_),
     band_(ptf.band_),
+    controlMode_(ptf.controlMode_),
     gain_(ptf.gain_),
     Qbase_(ptf.Qbase_),
     Qmin_(ptf.Qmin_),
@@ -222,11 +227,20 @@ updateCoeffs()
     if (sensorFound)
     {
         const scalar Tband = Tset_ + band_;
+        const bool linearMode = (controlMode_ == "linear");
+
         if (Tsens > Tband)
         {
             const scalar err = Tsens - Tband;
-            const scalar factor = max(scalar(0), 1 - gain_*err);
-            Qeff = clamp(Qbase_*factor, Qmin_, Qmax_);
+            if (linearMode)
+            {
+                Qeff = clamp(Qbase_ - gain_*err, Qmin_, Qmax_);
+            }
+            else
+            {
+                const scalar factor = max(scalar(0), 1 - gain_*err);
+                Qeff = clamp(Qbase_*factor, Qmin_, Qmax_);
+            }
         }
         else
         {
@@ -318,6 +332,7 @@ updateCoeffs()
                 << " Tset=" << Tset_
                 << " band=" << band_
                 << " gain=" << gain_
+                << " mode=" << controlMode_
                 << " rampRate=" << rampRate_
                 << endl;
         }
@@ -342,6 +357,10 @@ write(Ostream& os) const
     os.writeEntry("sensorPoint", sensorPoint_);
     os.writeEntry("Tset", Tset_);
     os.writeEntry("band", band_);
+    if (controlMode_ != "scale")
+    {
+        os.writeEntry("controlMode", controlMode_);
+    }
     os.writeEntry("gain", gain_);
     os.writeEntry("rampRate", rampRate_);
 
