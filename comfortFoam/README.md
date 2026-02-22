@@ -131,11 +131,12 @@ The following fields must be present in your OpenFOAM case:
 ### Optional Humidity Fields
 
 comfortFoam searches for humidity fields in this order:
-1. `RH` - Relative humidity [%]
-2. `relativeHumidity` - Relative humidity [%]
-3. `thermo:relHum` - From buoyantHumiditySimpleFoam
-4. `relHum` - Alternative naming
-5. Falls back to value in `comfortFoamDict`
+1. `thermo:relHum` - From buoyantHumiditySimpleFoam
+2. `thermoRelHum` - Legacy naming
+3. `relHum` - Alternative naming
+4. `RH` - Relative humidity [%]
+5. `relativeHumidity` - Relative humidity [%]
+6. Falls back to value in `comfortFoamDict`
 
 ### Optional Turbulence Fields
 

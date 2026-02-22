@@ -27,6 +27,8 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 - **comfortFoam**: ISO 7730 thermal comfort (PMV, PPD, Draft Rating)
 - **UTCIFoam**: Universal Thermal Climate Index calculator
 - **ASHRAE55Foam**: ASHRAE Standard 55 compliance analysis
+- **ISO7243Foam**: ISO 7243 WBGT heat stress assessment
+- **ISO7933Foam**: ISO 7933 heat strain screening
 - **AoAFoam**: Age of Air calculation for ventilation assessment
 
 #### Boundary Conditions
@@ -48,6 +50,8 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 - [comfortFoam](comfortFoam/README.md) - ISO 7730 comfort metrics
 - [UTCIFoam](UTCIFoam/README.md) - UTCI calculation with weather data support
 - [ASHRAE55Foam](ASHRAE55/README.md) - ASHRAE-55 adaptive comfort model
+- [ISO7243Foam](ISO7243/README.md) - ISO 7243 WBGT post-processing
+- [ISO7933Foam](ISO7933/README.md) - ISO 7933 heat strain screening
 
 ### Boundary Conditions
 - [buildingElementBC](buildingElementBC/README.md) - Multi-layer wall boundary condition with radiation
@@ -64,6 +68,8 @@ The humidity transport is integrated into OpenFOAM's thermophysical framework th
 ### Comfort Calculations
 All comfort tools follow established standards:
 - **ISO 7730**: Fanger's PMV/PPD model with local draft rating
+- **ISO 7243**: WBGT-based heat stress assessment
+- **ISO 7933**: Heat strain screening based on required evaporation
 - **UTCI**: 6th-order polynomial approximation with radiation effects
 - **ASHRAE-55**: Adaptive comfort model for naturally ventilated spaces
 

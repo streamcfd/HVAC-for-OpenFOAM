@@ -1,0 +1,47 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2412                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      ISO7243Dict;
+}
+
+// Default relative humidity in %.
+// Used only if no humidity field is found.
+RH                      50;
+
+// Default WBGT formula for WBGTISO7243_C:
+// false: indoor/no solar  (0.7*Tnwb + 0.3*Tg)
+// true : outdoor/solar    (0.7*Tnwb + 0.2*Tg + 0.1*Ta)
+useOutdoorSolarFormula   false;
+
+// Optional field names if your case uses custom names.
+tNwbFieldName            Tnwb;
+tgFieldName              Tg;
+tmrtFieldName            Tmrt;
+
+// Offset [degC] added when Tg is estimated (not when Tg field exists).
+globeTemperatureOffset   0.0;
+
+// Emissivity used when estimating Tg from qr.
+globeEmissivity          0.95;
+
+// Non-normative WBGT thresholds for ISO7243RiskLevel:
+// level 0: WBGT <= lowRiskLimit
+// level 1: lowRiskLimit < WBGT <= moderateRiskLimit
+// level 2: moderateRiskLimit < WBGT <= highRiskLimit
+// level 3: WBGT > highRiskLimit
+//
+// Adjust these values for workload/acclimatization according to your project.
+lowRiskLimit             25.0;
+moderateRiskLimit        28.0;
+highRiskLimit            31.0;
+
+// ************************************************************************* //

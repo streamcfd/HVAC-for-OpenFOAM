@@ -42,7 +42,8 @@ Description
     For humidity calculations, run: buoyantHumiditySimpleFoam / buoyantHumidityPimpleFoam
     
     Supported humidity fields:
-    - thermo::relHum (from buoyantHumiditySimpleFoam, range [0,1])
+    - thermo:relHum (from buoyantHumiditySimpleFoam, range [0,1])
+    - thermoRelHum (legacy naming, range [0,1])
     - relHum (legacy field, range [0,100] or [0,1])
     - Default constant value if no field available
     
@@ -815,28 +816,39 @@ int main(int argc, char *argv[])
         // Check for humidity field - multiple possible sources
         bool humidityAvailable = false;
         autoPtr<volScalarField> humidityField;
-        
-        // Try thermoRelHum first (buoyantHumiditySimpleFoam)
-        IOobject thermoRelHumHeader
-        (
+        word humiditySource("ISO7730Dict RH");
+
+        const wordList humidityCandidates
+        ({
+            "thermo:relHum",
             "thermoRelHum",
-            runTime.timeName(),
-            mesh,
-            IOobject::READ_IF_PRESENT
-        );
-        
-        if (thermoRelHumHeader.typeHeaderOk<volScalarField>())
+            "relHum",
+            "RH",
+            "relativeHumidity"
+        });
+
+        forAll(humidityCandidates, i)
         {
-            Info<< "Using thermoRelHum field from buoyantHumiditySimpleFoam" << endl;
-            humidityField.reset(new volScalarField(thermoRelHumHeader, mesh));
-            humidityAvailable = true;
+            IOobject humidityHeader
+            (
+                humidityCandidates[i],
+                runTime.timeName(),
+                mesh,
+                IOobject::READ_IF_PRESENT
+            );
+
+            if (humidityHeader.typeHeaderOk<volScalarField>())
+            {
+                humidityField.reset(new volScalarField(humidityHeader, mesh));
+                humidityAvailable = true;
+                humiditySource = humidityCandidates[i];
+                break;
+            }
         }
-        // Fallback to relHum field
-        else if (max(relHum).value() > SMALL)
+
+        if (humidityAvailable)
         {
-            Info<< "Using relHum field" << endl;
-            humidityField.reset(new volScalarField(relHum));
-            humidityAvailable = true;
+            Info<< "Using humidity field: " << humiditySource << endl;
         }
         else
         {

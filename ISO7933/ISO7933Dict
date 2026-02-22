@@ -1,0 +1,80 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2412                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      ISO7933Dict;
+}
+
+// Fallback relative humidity [%] if no humidity field is found.
+RH                      50;
+
+// Metabolic rate and external work.
+// If metIsMetUnit=true: met/wme are interpreted as met units.
+// If metIsMetUnit=false: met/wme are interpreted as W/m^2.
+metIsMetUnit            true;
+met                     1.6;
+wme                     0.0;
+
+// Clothing and vapor permeability.
+clo                     0.5;
+im                      0.38;
+
+// Exposure duration and integration time step [min].
+exposureDuration        480;
+timeStep                1.0;
+
+// Subject data.
+bodySurfaceArea         1.8;    // m^2
+bodyMass                75;     // kg
+bodySpecificHeat        3470;   // J/(kg K)
+
+// Initial and limit temperatures [degC].
+initialCoreTemperature  37.0;
+initialSkinTemperature  34.1;
+coreNeutralTemperature  37.0;
+skinNeutralTemperature  34.1;
+coreTemperatureLimit    38.0;
+
+// Two-compartment model parameters.
+coreCompartmentFraction 0.90;   // heat capacity fraction in core
+coreSkinConductance     5.3;    // W/(m^2 K)
+
+// Sweat controller.
+maxSweatRate            500;    // g/(m^2 h)
+sweatControlGain        350;    // g/(m^2 h K)
+sweatTimeConstant       10.0;   // min
+
+// Water loss limits as fractions of body mass.
+// lossLimit95Fraction: conservative limit (95% criterion)
+// lossLimit50Fraction: mean limit (50% criterion)
+lossLimit95Fraction     0.05;
+lossLimit50Fraction     0.075;
+
+// Legacy compatibility parameter, used if lossLimit95Fraction is absent.
+maxWaterLossFraction    0.05;
+
+// Target body heat storage [W/m^2], typically 0.
+targetStorage           0.0;
+
+// Efficiency factor for evaporative capacity [0..1].
+evaporationEfficiency   1.0;
+
+// Optional field names for radiant temperature input.
+trFieldName             Tr;
+tmrtFieldName           Tmrt;
+tgFieldName             Tg;
+
+// Optional correction [degC] for estimated radiant temperature
+// and emissivity for qr-based estimation.
+radiantTemperatureOffset 0.0;
+globeEmissivity          0.95;
+
+// ************************************************************************* //
