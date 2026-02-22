@@ -48,7 +48,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:rho"),
+            phasePropertyName("rhoMix"),
             mesh.time().timeName(),
             mesh,
             IOobject::NO_READ,
@@ -90,7 +90,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:relHum"),
+            phasePropertyName("relHum"),
             mesh.time().timeName(),
             mesh,
             IOobject::NO_READ,
@@ -221,7 +221,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:rho"),
+            phasePropertyName("rhoMix"),
             mesh.time().timeName(),
             mesh,
             IOobject::NO_READ,
@@ -263,7 +263,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:relHum"),
+            phasePropertyName("relHum"),
             mesh.time().timeName(),
             mesh,
             IOobject::NO_READ,
@@ -395,7 +395,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:rho"),
+            phasePropertyName("rhoMix"),
             mesh.time().timeName(),
             mesh,
             IOobject::NO_READ,
@@ -437,7 +437,7 @@ Foam::humidityRhoThermo::humidityRhoThermo
     (
         IOobject
         (
-            phasePropertyName("thermo:relHum"),
+            phasePropertyName("relHum"),
             mesh.time().timeName(),
             mesh,
             IOobject::NO_READ,
