@@ -35,8 +35,8 @@ Description
     - Turbulent intensity %
 
     Analysis can be limited to specific regions:
-    - Use -cellSet <name> to analyze only cells in specified cellSet
-    - Use -cellZone <name> to analyze only cells in specified cellZone
+    - Use -cellSet <name> (or -setFields <name>) for a specific cellSet
+    - Use -cellZone <name> for a specific cellZone
     - Without options: analyzes entire mesh
 
     For humidity calculations, run: buoyantHumiditySimpleFoam / buoyantHumidityPimpleFoam
@@ -56,6 +56,7 @@ Description
     Usage examples:
     comfortFoam                           # Analyze entire mesh
     comfortFoam -cellSet occupancyZone    # Analyze only specified cellSet
+    comfortFoam -setFields occupancyZone  # Alias for -cellSet
     comfortFoam -cellZone roomA           # Analyze only specified cellZone
 
 Background
@@ -148,6 +149,13 @@ enum class ComfortCategory
     B,  // Medium comfort  
     C,  // Moderate comfort
     None // No category
+};
+
+enum class AnalysisRegionType
+{
+    EntireMesh,
+    CellSet,
+    CellZone
 };
 
 // Convert comfort category to string
@@ -534,39 +542,244 @@ ComfortCategory analyzeComfortCategory(scalar pmv, scalar dr, scalar ppd)
     }
 }
 
-// Get list of cells to analyze (either from cellSet/cellZone or entire mesh)
-Foam::labelList getCellsToAnalyze(const fvMesh& mesh, const argList& args)
+// Normalize selection labels to valid local cell labels.
+// In parallel, this also handles the case where a set/zone stores global labels.
+Foam::labelList normalizeSelectedCells
+(
+    const fvMesh& mesh,
+    const labelUList& rawCells,
+    const word& selectionKind,
+    const word& selectionName
+)
+{
+    const label nLocalCells = mesh.nCells();
+    bool hasOutOfLocalRange = false;
+
+    forAll(rawCells, i)
+    {
+        const label cellI = rawCells[i];
+        if (cellI < 0 || cellI >= nLocalCells)
+        {
+            hasOutOfLocalRange = true;
+            break;
+        }
+    }
+
+    if (Pstream::parRun())
+    {
+        reduce(hasOutOfLocalRange, orOp<bool>());
+    }
+
+    DynamicList<label> validCells(rawCells.size());
+    label nDiscarded = 0;
+
+    if (Pstream::parRun() && hasOutOfLocalRange)
+    {
+        const globalIndex& globalCellAddr = mesh.globalData().globalMeshCellAddr();
+
+        forAll(rawCells, i)
+        {
+            const label globalCellI = rawCells[i];
+            if (globalCellAddr.isLocal(globalCellI))
+            {
+                validCells.append(globalCellAddr.toLocal(globalCellI));
+            }
+            else
+            {
+                ++nDiscarded;
+            }
+        }
+
+        const label totalDiscarded = returnReduce(nDiscarded, sumOp<label>());
+        if (totalDiscarded > 0)
+        {
+            Info<< "Converted global labels for " << selectionKind << " "
+                << selectionName << " and ignored " << totalDiscarded
+                << " non-local entries across all processors." << endl;
+        }
+    }
+    else
+    {
+        forAll(rawCells, i)
+        {
+            const label localCellI = rawCells[i];
+            if (localCellI >= 0 && localCellI < nLocalCells)
+            {
+                validCells.append(localCellI);
+            }
+            else
+            {
+                ++nDiscarded;
+            }
+        }
+
+        const label totalDiscarded = returnReduce(nDiscarded, sumOp<label>());
+        if (totalDiscarded > 0)
+        {
+            WarningInFunction
+                << "Ignoring " << totalDiscarded << " invalid labels in "
+                << selectionKind << " " << selectionName << endl;
+        }
+    }
+
+    labelList cellsToAnalyze(validCells.size());
+    forAll(validCells, i)
+    {
+        cellsToAnalyze[i] = validCells[i];
+    }
+
+    // Defensive duplicate removal to avoid double-counting volume.
+    if (!cellsToAnalyze.empty())
+    {
+        sort(cellsToAnalyze);
+        label writeI = 0;
+        for (label readI = 1; readI < cellsToAnalyze.size(); ++readI)
+        {
+            if (cellsToAnalyze[readI] != cellsToAnalyze[writeI])
+            {
+                cellsToAnalyze[++writeI] = cellsToAnalyze[readI];
+            }
+        }
+        cellsToAnalyze.setSize(writeI + 1);
+    }
+
+    return cellsToAnalyze;
+}
+
+// Get list of cells to analyze (from CLI/dictionary cellSet/cellZone or entire mesh)
+Foam::labelList getCellsToAnalyze
+(
+    const fvMesh& mesh,
+    const argList& args,
+    const dictionary& comfortFoamDict,
+    AnalysisRegionType& selectionType,
+    word& selectionName
+)
 {
     labelList cellsToAnalyze;
-    
-    // Check for cellSet option
-    if (args.found("cellSet"))
+    selectionType = AnalysisRegionType::EntireMesh;
+    selectionName.clear();
+
+    const bool cliCellSetFound = args.found("cellSet");
+    const bool cliSetFieldsFound = args.found("setFields");
+    const bool cliCellZoneFound = args.found("cellZone");
+
+    word cliCellSetName;
+    if (cliCellSetFound)
     {
-        word cellSetName = args.get<word>("cellSet");
-        
+        cliCellSetName = args.get<word>("cellSet");
+    }
+    if (cliSetFieldsFound)
+    {
+        const word setFieldsName = args.get<word>("setFields");
+        if (cliCellSetFound && setFieldsName != cliCellSetName)
+        {
+            FatalErrorInFunction
+                << "Both -cellSet and -setFields were specified with different names: "
+                << cliCellSetName << " vs " << setFieldsName << nl
+                << "Use only one option (or use the same name)."
+                << abort(FatalError);
+        }
+        cliCellSetName = setFieldsName;
+    }
+
+    const bool dictCellSetFound = comfortFoamDict.found("cellSet");
+    const bool dictSetFieldsFound = comfortFoamDict.found("setFields");
+    const bool dictCellZoneFound = comfortFoamDict.found("cellZone");
+
+    word dictCellSetName;
+    if (dictCellSetFound)
+    {
+        dictCellSetName = word(comfortFoamDict.lookup("cellSet"));
+    }
+    if (dictSetFieldsFound)
+    {
+        const word setFieldsName(word(comfortFoamDict.lookup("setFields")));
+        if (dictCellSetFound && setFieldsName != dictCellSetName)
+        {
+            FatalErrorInFunction
+                << "Both dictionary entries cellSet and setFields are defined with "
+                << "different names: " << dictCellSetName << " vs " << setFieldsName << nl
+                << "Use only one of these entries (or use the same name)."
+                << abort(FatalError);
+        }
+        dictCellSetName = setFieldsName;
+    }
+
+    const bool cliAnySelection =
+        cliCellZoneFound || !cliCellSetName.empty();
+    const bool dictAnySelection =
+        dictCellZoneFound || !dictCellSetName.empty();
+
+    if (cliAnySelection && dictAnySelection)
+    {
+        Info<< "Both CLI and comfortFoamDict region selections are specified. "
+            << "Using CLI selection." << endl;
+    }
+
+    // CLI selection has priority over dictionary selection
+    bool useCellSet = false;
+    bool useCellZone = false;
+    word cellSetName;
+    word cellZoneName;
+
+    if (cliAnySelection)
+    {
+        useCellSet = !cliCellSetName.empty();
+        useCellZone = cliCellZoneFound;
+        cellSetName = cliCellSetName;
+        if (cliCellZoneFound)
+        {
+            cellZoneName = args.get<word>("cellZone");
+        }
+    }
+    else
+    {
+        useCellSet = !dictCellSetName.empty();
+        useCellZone = dictCellZoneFound;
+        cellSetName = dictCellSetName;
+        if (dictCellZoneFound)
+        {
+            cellZoneName = word(comfortFoamDict.lookup("cellZone"));
+        }
+    }
+
+    if (useCellSet && useCellZone)
+    {
+        FatalErrorInFunction
+            << "Both cellSet and cellZone region selections are specified. "
+            << "Use only one."
+            << abort(FatalError);
+    }
+
+    // Check for cellSet option
+    if (useCellSet)
+    {
         Info<< "Loading cellSet: " << cellSetName << endl;
         
         cellSet selectedCells(mesh, cellSetName);
-        
-        if (selectedCells.empty())
+
+        const labelList rawCells = selectedCells.toc();
+        cellsToAnalyze =
+            normalizeSelectedCells(mesh, rawCells, "cellSet", cellSetName);
+
+        const label nCells = returnReduce(cellsToAnalyze.size(), sumOp<label>());
+        if (nCells == 0)
         {
             FatalErrorInFunction
-                << "cellSet " << cellSetName << " is empty or does not exist"
+                << "cellSet " << cellSetName
+                << " is empty, invalid, or not available on this case."
                 << abort(FatalError);
         }
-        
-        cellsToAnalyze = selectedCells.toc();
-        
-        label nCells = cellsToAnalyze.size();
-        reduce(nCells, sumOp<label>());
+
         Info<< "Analyzing " << nCells 
             << " cells from cellSet " << cellSetName << endl;
+        selectionType = AnalysisRegionType::CellSet;
+        selectionName = cellSetName;
     }
     // Check for cellZone option
-    else if (args.found("cellZone"))
+    else if (useCellZone)
     {
-        word cellZoneName = args.get<word>("cellZone");
-        
         Info<< "Loading cellZone: " << cellZoneName << endl;
         
         const cellZoneMesh& cellZones = mesh.cellZones();
@@ -581,12 +794,23 @@ Foam::labelList getCellsToAnalyze(const fvMesh& mesh, const argList& args)
         }
         
         const cellZone& cz = cellZones[zoneID];
-        cellsToAnalyze = cz;
-        
-        label nCells = cellsToAnalyze.size();
-        reduce(nCells, sumOp<label>());
+        const labelList rawCells = cz;
+        cellsToAnalyze =
+            normalizeSelectedCells(mesh, rawCells, "cellZone", cellZoneName);
+
+        const label nCells = returnReduce(cellsToAnalyze.size(), sumOp<label>());
+        if (nCells == 0)
+        {
+            FatalErrorInFunction
+                << "cellZone " << cellZoneName
+                << " is empty after parallel label mapping."
+                << abort(FatalError);
+        }
+
         Info<< "Analyzing " << nCells 
             << " cells from cellZone " << cellZoneName << endl;
+        selectionType = AnalysisRegionType::CellZone;
+        selectionName = cellZoneName;
     }
     // Use entire mesh
     else
@@ -599,6 +823,8 @@ Foam::labelList getCellsToAnalyze(const fvMesh& mesh, const argList& args)
         
         label nCells = returnReduce(cellsToAnalyze.size(), sumOp<label>());
         Info<< "Analyzing entire mesh: " << nCells << " cells" << endl;
+        selectionType = AnalysisRegionType::EntireMesh;
+        selectionName.clear();
     }
     
     return cellsToAnalyze;
@@ -663,6 +889,13 @@ int main(int argc, char *argv[])
         "cellSet",
         "name",
         "Analyze only cells in the specified cellSet instead of entire mesh"
+    );
+
+    argList::addOption
+    (
+        "setFields",
+        "name",
+        "Alias for -cellSet (analyze only cells in the specified cellSet)"
     );
     
     argList::addOption
@@ -896,8 +1129,11 @@ int main(int argc, char *argv[])
         // Load velocity field
         volVectorField U(UHeader, mesh);
         
-        // Get cells to analyze (cellSet, cellZone, or entire mesh)
-        labelList cellsToAnalyze = getCellsToAnalyze(mesh, args);
+        // Get cells to analyze (cellSet/cellZone from CLI or comfortFoamDict)
+        AnalysisRegionType selectionType;
+        word selectionName;
+        labelList cellsToAnalyze =
+            getCellsToAnalyze(mesh, args, comfortFoamDict, selectionType, selectionName);
         
         // Calculate averages for analysis region
         scalar avgVelocityMag, avgTemperature, totalAnalysisVolume;
@@ -920,6 +1156,30 @@ int main(int argc, char *argv[])
         scalar volumeWeightedTu(0);
         scalar totalVolume(0);
 
+        // Radiation source selection must be rank-consistent in parallel.
+        const bool useGField = G.headerOk();
+        const bool useQrField = (!useGField && qrHeader.typeHeaderOk<volScalarField>());
+        const bool useIDefaultField =
+            (!useGField && !useQrField && IDefaultHeader.typeHeaderOk<volScalarField>());
+
+        autoPtr<volScalarField> qrField;
+        autoPtr<volScalarField> IDefaultField;
+        scalar fallbackRadTemp = 0.0;
+
+        if (useQrField)
+        {
+            qrField.reset(new volScalarField(qrHeader, mesh));
+        }
+        else if (useIDefaultField)
+        {
+            IDefaultField.reset(new volScalarField(IDefaultHeader, mesh));
+        }
+        else
+        {
+            // Uses gSum internally, so evaluate once per time-step (not per cell).
+            fallbackRadTemp = calculateRadiationTemperature(mesh, patches);
+        }
+
         // Main calculation loop - only over selected cells
         forAll(cellsToAnalyze, i)
         {
@@ -929,22 +1189,21 @@ int main(int argc, char *argv[])
             
             // Determine radiation temperature from available radiation fields
             scalar cellRadTemp;
-            if (G.headerOk())
+            if (useGField)
             {
                 // Use incident radiation field G (primary choice)
                 scalar gValue = Foam::max(0.0, Foam::min(50000.0, G[cellI]));
                 cellRadTemp = Foam::pow(gValue / (4.0 * ComfortConstants::stefanBoltzmannConstant), 0.25) - 273.0;
             }
-            else if (qrHeader.typeHeaderOk<volScalarField>())
+            else if (qrField.valid())
             {
                 // Use radiative heat flux field qr
-                volScalarField qr(qrHeader, mesh);
                 // qr is typically the net radiative heat flux in W/m^2
                 // For a gray surface: qr = epsilon * sigma * (T^4 - T_rad^4)
                 // Assuming epsilon = 0.9 and using local temperature to estimate T_rad
                 scalar epsilon = 0.9;
                 scalar localTemp = cellTemp;
-                scalar qrValue = qr[cellI];
+                scalar qrValue = qrField()[cellI];
                 // Solve for T_rad from: qr = epsilon * sigma * (T^4 - T_rad^4)
                 scalar T4_rad = Foam::pow(localTemp, 4) - qrValue / (epsilon * ComfortConstants::stefanBoltzmannConstant);
                 if (T4_rad > 0)
@@ -957,20 +1216,19 @@ int main(int argc, char *argv[])
                     cellRadTemp = localTemp - 273.0;
                 }
             }
-            else if (IDefaultHeader.typeHeaderOk<volScalarField>())
+            else if (IDefaultField.valid())
             {
                 // Use default radiation intensity field IDefault
-                volScalarField IDefault(IDefaultHeader, mesh);
                 // IDefault is radiation intensity in W/m^2/sr
                 // Total irradiance G = 4*pi*I for isotropic radiation
-                scalar gValue = 4.0 * constant::mathematical::pi * IDefault[cellI];
+                scalar gValue = 4.0 * constant::mathematical::pi * IDefaultField()[cellI];
                 gValue = Foam::max(0.0, Foam::min(50000.0, gValue));
                 cellRadTemp = Foam::pow(gValue / (4.0 * ComfortConstants::stefanBoltzmannConstant), 0.25) - 273.0;
             }
             else
             {
                 // Fallback: Use area-weighted wall temperature
-                cellRadTemp = calculateRadiationTemperature(mesh, patches);
+                cellRadTemp = fallbackRadTemp;
             }
             
             // Calculate relative humidity
@@ -1077,13 +1335,13 @@ int main(int argc, char *argv[])
         Info<< nl << "============ THERMAL COMFORT ANALYSIS RESULTS ============" << nl;
         
         // Show analysis region info
-        if (args.found("cellSet"))
+        if (selectionType == AnalysisRegionType::CellSet)
         {
-            Info<< "Analysis region: cellSet " << args.get<word>("cellSet") << nl;
+            Info<< "Analysis region: cellSet " << selectionName << nl;
         }
-        else if (args.found("cellZone"))
+        else if (selectionType == AnalysisRegionType::CellZone)
         {
-            Info<< "Analysis region: cellZone " << args.get<word>("cellZone") << nl;
+            Info<< "Analysis region: cellZone " << selectionName << nl;
         }
         else
         {

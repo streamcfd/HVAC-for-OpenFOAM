@@ -24,4 +24,9 @@ met     1.2;    // Metabolic rate [met]
 wme     0;      // External work [met] (usually 0)
 RH      50;     // Default relative humidity [%] (used if no humidity field available)
 
+// Optional analysis region selection (choose only one):
+// cellSet    occupiedZone;
+// setFields  occupiedZone;   // Alias for cellSet
+// cellZone   roomA;
+
 // ************************************************************************* //

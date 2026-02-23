@@ -59,6 +59,7 @@ comfortFoam
 |--------|-------------|---------|
 | `-region <name>` | Specify mesh region for multi-region cases | - |
 | `-cellSet <name>` | Calculate comfort only for specified cellSet | - |
+| `-setFields <name>` | Alias for `-cellSet <name>` | - |
 | `-cellZone <name>` | Calculate comfort only for specified cellZone | - |
 | `-noWrite` | Calculate without writing fields | false |
 | `-validate` | Run ISO 7730 validation mode | false |
@@ -116,6 +117,11 @@ wme         0;
 // Used only if humidity field is not available in the case
 // Range: 0-100
 RH          50;
+
+// Optional analysis region (choose only one):
+// cellSet   occupiedZone;
+// setFields occupiedZone;    // Alias for cellSet
+// cellZone  roomA;
 
 // ************************************************************************* //
 ```
