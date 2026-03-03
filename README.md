@@ -56,6 +56,20 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 ### Boundary Conditions
 - [buildingElementBC](buildingElementBC/README.md) - Multi-layer wall boundary condition with radiation
 
+## OpenFOAM-v2512 Patch Set
+
+This repository contains a ready-to-copy patch tree for OpenFOAM v2512 at:
+
+- `OpenFOAM-v2512/src/thermophysicalModels/radiation/`
+
+The patch extends solar radiation handling for partially transparent surfaces (`0 < t < 1`) by:
+
+- enabling transmissivity from `transparent` boundary radiation properties
+- propagating ray transmissivity through `solarLoad` face shading
+- scaling direct and reflected solar load contributions consistently
+
+To apply in an OpenFOAM-v2512 source tree, copy the matching files from this folder into the OpenFOAM source and rebuild the radiation libraries with `wmake`.
+
 ## Technical Details
 
 ### Humidity Modeling
