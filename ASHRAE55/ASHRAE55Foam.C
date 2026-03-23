@@ -47,6 +47,7 @@ Version
 #include "fvCFD.H"
 #include "singlePhaseTransportModel.H"
 #include "wallFvPatch.H"
+#include "externalWallHeatFluxTemperatureFvPatchScalarField.H"
 #include "cellSet.H"
 #include "turbulentTransportModel.H"
 #include "turbulentFluidThermoModel.H"
@@ -67,6 +68,37 @@ struct EPWData
     Foam::scalar timeZone;                    // Time zone (GMT offset) from EPW header
     Foam::string locationName;                // Location name from EPW header
 };
+
+namespace Foam
+{
+namespace ASHRAE55Constants
+{
+    const scalar baseMetabolicRate = 58.15;
+    const scalar skinDiffusionCoeff = 3.05e-3;
+    const scalar thermalCoeff = 6.99;
+    const scalar basePressure = 5733;
+    const scalar respirationCoeff1 = 1.7e-5;
+    const scalar respirationCoeff2 = 0.0014;
+    const scalar respirationTemp = 34.0;
+    const scalar respirationHumidity = 5867;
+    const scalar radiationCoeff = 3.96;
+    const scalar thermalSensCoeff1 = 0.303;
+    const scalar thermalSensCoeff2 = 0.036;
+    const scalar thermalSensCoeff3 = 0.028;
+    const scalar clothingFactor1 = 1.29;
+    const scalar clothingFactor2 = 1.05;
+    const scalar clothingFactor3 = 0.645;
+    const scalar clothingThreshold = 0.078;
+    const scalar forcedConvectionCoeff = 12.1;
+    const scalar naturalConvectionCoeff = 2.38;
+    const scalar naturalConvectionExp = 0.25;
+    const label maxClothingIterations = 150;
+    const scalar clothingConvergenceTol = 0.00015;
+    const scalar ppdCoeff1 = 0.03353;
+    const scalar ppdCoeff2 = 0.2179;
+    const scalar ppdBase = 95.0;
+}
+}
 
 // * * * * * * * * * * * * * * * * * * * Functions  * * * * * * * * * * * * * //
 
@@ -488,6 +520,198 @@ Foam::scalar calculateRunningMeanFromEPW
     return T_rm;
 }
 
+void validatePMVInputs(scalar met, scalar clo, scalar wme, scalar rh)
+{
+    if (met < 0.8 || met > 4.0)
+    {
+        FatalErrorInFunction
+            << "Metabolic rate out of valid range (0.8-4.0 met): " << met
+            << exit(FatalError);
+    }
+
+    if (clo < 0.0 || clo > 2.0)
+    {
+        FatalErrorInFunction
+            << "Clothing insulation out of valid range (0-2.0 clo): " << clo
+            << exit(FatalError);
+    }
+
+    if (wme < 0.0 || wme > met)
+    {
+        FatalErrorInFunction
+            << "External work out of valid range (0-" << met << " met): " << wme
+            << exit(FatalError);
+    }
+
+    if (rh < 0.0 || rh > 100.0)
+    {
+        FatalErrorInFunction
+            << "Relative humidity out of valid range (0-100%): " << rh
+            << exit(FatalError);
+    }
+}
+
+Foam::scalar calculateWaterVapourPressure(scalar temperature, scalar relativeHumidity)
+{
+    scalar tempCelsius = temperature - 273.0;
+    return relativeHumidity * 10.0
+         * Foam::exp(16.6536 - (4030.183 / (tempCelsius + 235.0)));
+}
+
+Foam::Tuple2<scalar> calculateClothingSurfaceTemperature
+(
+    scalar airTemp,
+    scalar velocity,
+    scalar icl,
+    scalar fcl,
+    scalar radiationTemp,
+    scalar metabolicRate,
+    scalar externalWork
+)
+{
+    using namespace Foam::ASHRAE55Constants;
+
+    scalar airTempC = airTemp - 273.0;
+    scalar tcla = airTemp + (35.5 - airTempC) / (3.5 * 6.45 * (icl + 0.1));
+    scalar xn = tcla / 100.0;
+    scalar xf = xn;
+
+    scalar p1 = icl * fcl;
+    scalar p2 = p1 * radiationCoeff;
+    scalar p3 = p1 * 100.0;
+    scalar p4 = p1 * airTemp;
+    scalar p5 = 308.7 - 0.028 * (metabolicRate - externalWork)
+              + p2 * Foam::pow((radiationTemp + 273.0) / 100.0, 4);
+
+    label iterationCount = 0;
+
+    do
+    {
+        iterationCount++;
+        xf = (xf + xn) / 2.0;
+
+        scalar hcf = forcedConvectionCoeff * Foam::sqrt(velocity);
+        scalar hcn = naturalConvectionCoeff * Foam::pow(mag(100.0 * xf - airTemp), naturalConvectionExp);
+        scalar hc = Foam::max(hcf, hcn);
+
+        xn = (p5 + p4 * hc - p2 * Foam::pow(xf, 4.0)) / (100.0 + p3 * hc);
+
+        if (iterationCount > maxClothingIterations)
+        {
+            WarningInFunction
+                << "Clothing temperature iteration did not converge after "
+                << maxClothingIterations << " iterations" << endl;
+            break;
+        }
+    }
+    while (mag(xn - xf) > clothingConvergenceTol);
+
+    return Tuple2<scalar>(100.0 * xn - 273.0, xn);
+}
+
+Foam::scalar calculatePMV
+(
+    scalar airTemp,
+    scalar velocity,
+    scalar relativeHumidity,
+    scalar radiationTemp,
+    scalar metabolicRate,
+    scalar clothingInsulation,
+    scalar externalWork
+)
+{
+    using namespace Foam::ASHRAE55Constants;
+
+    scalar airTempC = airTemp - 273.0;
+    scalar icl = 0.155 * clothingInsulation;
+    scalar fcl = (icl < clothingThreshold)
+        ? (1.0 + clothingFactor1 * icl)
+        : (clothingFactor2 + clothingFactor3 * icl);
+
+    scalar pa = calculateWaterVapourPressure(airTemp, relativeHumidity);
+
+    Tuple2<scalar> tclResult = calculateClothingSurfaceTemperature
+    (
+        airTemp,
+        velocity,
+        icl,
+        fcl,
+        radiationTemp,
+        metabolicRate,
+        externalWork
+    );
+
+    scalar tcl = tclResult.first();
+    scalar xn = tclResult.second();
+
+    scalar hl1 = skinDiffusionCoeff * (basePressure - (thermalCoeff * (metabolicRate - externalWork)) - pa);
+    scalar hl2 = 0.0;
+
+    if ((metabolicRate - externalWork) > baseMetabolicRate)
+    {
+        hl2 = 0.42 * ((metabolicRate - externalWork) - baseMetabolicRate);
+    }
+
+    scalar hl3 = respirationCoeff1 * metabolicRate * (respirationHumidity - pa);
+    scalar hl4 = respirationCoeff2 * metabolicRate * (respirationTemp - airTempC);
+    scalar hl5 = radiationCoeff * fcl
+        * (Foam::pow(xn, 4) - Foam::pow((radiationTemp + 273.0) / 100.0, 4));
+
+    scalar hcf = forcedConvectionCoeff * Foam::sqrt(velocity);
+    scalar hcn = naturalConvectionCoeff * Foam::pow(mag(tcl - airTempC), naturalConvectionExp);
+    scalar hc = Foam::max(hcf, hcn);
+    scalar hl6 = fcl * hc * (tcl - airTempC);
+
+    scalar ts = thermalSensCoeff1 * Foam::exp(-thermalSensCoeff2 * metabolicRate) + thermalSensCoeff3;
+
+    return ts * ((metabolicRate - externalWork) - hl1 - hl2 - hl3 - hl4 - hl5 - hl6);
+}
+
+Foam::scalar calculatePPD(scalar pmv)
+{
+    using namespace Foam::ASHRAE55Constants;
+
+    return 100.0 - ppdBase * Foam::exp(-ppdCoeff1 * Foam::pow(pmv, 4) - ppdCoeff2 * Foam::pow(pmv, 2));
+}
+
+Foam::autoPtr<volScalarField> loadRelativeHumidityField
+(
+    const fvMesh& mesh,
+    const Time& runTime,
+    bool& humidityAvailable,
+    word& humiditySource
+)
+{
+    wordList humidityCandidates(5);
+    humidityCandidates[0] = "thermo:relHum";
+    humidityCandidates[1] = "thermoRelHum";
+    humidityCandidates[2] = "relHum";
+    humidityCandidates[3] = "RH";
+    humidityCandidates[4] = "relativeHumidity";
+
+    forAll(humidityCandidates, i)
+    {
+        IOobject humidityHeader
+        (
+            humidityCandidates[i],
+            runTime.timeName(),
+            mesh,
+            IOobject::READ_IF_PRESENT
+        );
+
+        if (humidityHeader.typeHeaderOk<volScalarField>(true))
+        {
+            humidityAvailable = true;
+            humiditySource = humidityCandidates[i];
+            return autoPtr<volScalarField>(new volScalarField(humidityHeader, mesh));
+        }
+    }
+
+    humidityAvailable = false;
+    humiditySource = "ASHRAE55Dict RH";
+    return autoPtr<volScalarField>();
+}
+
 // Function to calculate and display comfort statistics
 void displayComfortStatistics
 (
@@ -579,6 +803,65 @@ void displayComfortStatistics
     }
 }
 
+void displayPMVStatistics
+(
+    const volScalarField& ASHRAEAcceptable,
+    const volScalarField& PMV,
+    const volScalarField& PPD,
+    const volScalarField& TOp,
+    const volScalarField& T,
+    const volVectorField& U,
+    scalar averageRH
+)
+{
+    label acceptableCells = 0;
+    label totalCells = 0;
+    scalar avgPMV = 0.0;
+    scalar avgPPD = 0.0;
+    scalar avgTOp = 0.0;
+    scalar avgAirTemp = 0.0;
+    scalar avgVelocity = 0.0;
+
+    forAll(PMV, cellI)
+    {
+        totalCells++;
+        avgPMV += PMV[cellI];
+        avgPPD += PPD[cellI];
+        avgTOp += TOp[cellI];
+        avgAirTemp += T[cellI];
+        avgVelocity += mag(U[cellI]);
+
+        if (ASHRAEAcceptable[cellI] > 0.5)
+        {
+            acceptableCells++;
+        }
+    }
+
+    if (totalCells > 0)
+    {
+        avgPMV /= totalCells;
+        avgPPD /= totalCells;
+        avgTOp /= totalCells;
+        avgAirTemp /= totalCells;
+        avgVelocity /= totalCells;
+
+        Info<< nl << "================= ASHRAE 55 PMV Analysis =================" << endl;
+        Info<< "Acceptability criterion: -0.5 <= PMV <= +0.5" << endl;
+        Info<< nl << "Domain Statistics:" << endl;
+        Info<< "  Total cells evaluated: " << totalCells << endl;
+        Info<< "  Average air temperature: " << (avgAirTemp - 273.15) << " C" << endl;
+        Info<< "  Average operative temperature: " << (avgTOp - 273.15) << " C" << endl;
+        Info<< "  Average air velocity: " << avgVelocity << " m/s" << endl;
+        Info<< "  Relative humidity used: " << averageRH << " %" << endl;
+        Info<< nl << "Comfort Results:" << endl;
+        Info<< "  Average PMV: " << avgPMV << endl;
+        Info<< "  Average PPD: " << avgPPD << " %" << endl;
+        Info<< "  Acceptable cells: " << acceptableCells << " ("
+            << (scalar(acceptableCells)/totalCells*100.0) << "%)" << endl;
+        Info<< "==========================================================" << nl << endl;
+    }
+}
+
 // * * * * * * * * * * * * * * * * * * Program  * * * * * * * * * * * * * * * //
 
 int main(int argc, char *argv[])
@@ -635,6 +918,41 @@ int main(int argc, char *argv[])
         "Directly specify running mean outdoor temperature in C"
     );
 
+    argList::addOption
+    (
+        "model",
+        "word",
+        "ASHRAE 55 model: adaptive or pmv (default: adaptive)"
+    );
+
+    argList::addOption
+    (
+        "met",
+        "scalar",
+        "Metabolic rate in met for PMV mode"
+    );
+
+    argList::addOption
+    (
+        "clo",
+        "scalar",
+        "Clothing insulation in clo for PMV mode"
+    );
+
+    argList::addOption
+    (
+        "wme",
+        "scalar",
+        "External work in met for PMV mode"
+    );
+
+    argList::addOption
+    (
+        "rh",
+        "scalar",
+        "Relative humidity in percent for PMV mode if no humidity field is available"
+    );
+
     #include "addTimeOptions.H"
     #include "setRootCase.H"
     #include "createTime.H"
@@ -643,6 +961,86 @@ int main(int argc, char *argv[])
     Foam::instantList timeDirs = Foam::timeSelector::select0(runTime, args);
 
     #include "createNamedMesh.H"
+
+    IOdictionary ASHRAE55Dict
+    (
+        IOobject
+        (
+            "ASHRAE55Dict",
+            runTime.constant(),
+            mesh,
+            IOobject::READ_IF_PRESENT,
+            IOobject::NO_WRITE
+        )
+    );
+
+    word modelName("adaptive");
+    scalar met = 1.2;
+    scalar clo = 0.5;
+    scalar wme = 0.0;
+    scalar RH = 50.0;
+
+    if (ASHRAE55Dict.found("model"))
+    {
+        modelName = word(ASHRAE55Dict.lookup("model"));
+    }
+    if (ASHRAE55Dict.found("met"))
+    {
+        met = readScalar(ASHRAE55Dict.lookup("met"));
+    }
+    if (ASHRAE55Dict.found("clo"))
+    {
+        clo = readScalar(ASHRAE55Dict.lookup("clo"));
+    }
+    if (ASHRAE55Dict.found("wme"))
+    {
+        wme = readScalar(ASHRAE55Dict.lookup("wme"));
+    }
+    if (ASHRAE55Dict.found("RH"))
+    {
+        RH = readScalar(ASHRAE55Dict.lookup("RH"));
+    }
+
+    if (args.found("model"))
+    {
+        modelName = args.get<word>("model");
+    }
+    if (args.found("met"))
+    {
+        met = args.get<scalar>("met");
+    }
+    if (args.found("clo"))
+    {
+        clo = args.get<scalar>("clo");
+    }
+    if (args.found("wme"))
+    {
+        wme = args.get<scalar>("wme");
+    }
+    if (args.found("rh"))
+    {
+        RH = args.get<scalar>("rh");
+    }
+
+    if (modelName != "adaptive" && modelName != "pmv")
+    {
+        FatalErrorInFunction
+            << "Unknown ASHRAE 55 model '" << modelName
+            << "'. Supported values are 'adaptive' and 'pmv'."
+            << exit(FatalError);
+    }
+
+    if (modelName == "pmv")
+    {
+        validatePMVInputs(met, clo, wme, RH);
+        Info << "Using ASHRAE 55 PMV model" << endl;
+        Info << "  met = " << met << ", clo = " << clo
+             << ", wme = " << wme << ", RH = " << RH << "%" << endl;
+    }
+    else
+    {
+        Info << "Using ASHRAE 55 adaptive model" << endl;
+    }
 
     // Determine running mean outdoor temperature and solar calculation settings
     scalar T_rm_out = 20.0; // Default value
@@ -717,7 +1115,7 @@ int main(int argc, char *argv[])
             Info << "Note: For best results, use OpenFOAM 2412+ native solar radiation model instead" << endl;
         }
     }
-    else
+    else if (modelName == "adaptive")
     {
         Info << "Warning: No EPW file or running mean specified." << endl;
         Info << "Using default value: " << T_rm_out << " C" << endl;
@@ -737,6 +1135,12 @@ int main(int argc, char *argv[])
                 << exit(FatalError);
         }
     }
+    else if (useSolarCalculations)
+    {
+        FatalErrorInFunction
+            << "Solar calculations require EPW file (-epw option)"
+            << exit(FatalError);
+    }
 
     forAll(timeDirs, timei)
     {
@@ -754,6 +1158,21 @@ int main(int argc, char *argv[])
         volVectorField U(UHeader, mesh);
 
         scalar t_cmf(0), ce(0);
+        scalar averageRHUsed = 0.0;
+        bool humidityAvailable = false;
+        word humiditySource("ASHRAE55Dict RH");
+        autoPtr<volScalarField> humidityField;
+
+        if (modelName == "pmv")
+        {
+            humidityField = loadRelativeHumidityField(mesh, runTime, humidityAvailable, humiditySource);
+            Info << "PMV mode humidity source: " << humiditySource;
+            if (!humidityAvailable)
+            {
+                Info << " (" << RH << "% fallback)";
+            }
+            Info << endl;
+        }
 
         //- Check if radiation field G is available
         Info << "G field check: G.headerOk() = " << G.headerOk() 
@@ -771,6 +1190,9 @@ int main(int argc, char *argv[])
         {
             ASHRAELevel80[cellI] = 0;
             ASHRAELevel90[cellI] = 0;
+            PMV[cellI] = 0;
+            PPD[cellI] = 0;
+            ASHRAEAcceptable[cellI] = 0;
             
             //- Use radiation model if available
             if (G.headerOk() == 1)
@@ -843,54 +1265,96 @@ int main(int argc, char *argv[])
                 }
             }
 
-            //- Only evaluate comfort if temperature is in reasonable range (10C to 33.5C)
-            if ( (T[cellI] > 283.15) && (T[cellI] < 306.65) )
-            {           
-                //- Calculate operative temperature: average of air and mean radiant temperature
-                TOp[cellI] = ( T[cellI] + (STemp + 273.15)) / 2.0;
-                
-                ce = 0;
+            //- Calculate operative temperature: average of air and mean radiant temperature
+            TOp[cellI] = ( T[cellI] + (STemp + 273.15)) / 2.0;
 
-                //- Calculate cooling effect of elevated air speed when Top > 25C
-                if ( (mag(U[cellI]) >= 0.6) && (TOp[cellI] > 298.15) )
+            if (modelName == "adaptive")
+            {
+                //- Only evaluate comfort if temperature is in reasonable range (10C to 33.5C)
+                if ( (T[cellI] > 283.15) && (T[cellI] < 306.65) )
                 {
-                    if (mag(U[cellI]) < 0.9) 
+                    ce = 0;
+
+                    //- Calculate cooling effect of elevated air speed when Top > 25C
+                    if ( (mag(U[cellI]) >= 0.6) && (TOp[cellI] > 298.15) )
                     {
-                        ce = 1.2;
+                        if (mag(U[cellI]) < 0.9)
+                        {
+                            ce = 1.2;
+                        }
+                        else if (mag(U[cellI]) < 1.2)
+                        {
+                            ce = 1.8;
+                        }
+                        else
+                        {
+                            ce = 2.2;
+                        }
                     }
-                    else if (mag(U[cellI]) < 1.2)  // CORRECTED: was 1.9, should be 1.2 per ASHRAE 55
-                    {   
-                        ce = 1.8;
-                    }
-                    else
-                    {                   
-                        ce = 2.2;
-                    }
+
+                    t_cmf = (0.31 * T_rm_out) + 17.8;
+                    scalar t_cmf_K = t_cmf + 273.15;
+
+                    if ((TOp[cellI] >= (t_cmf_K - 3.5)) && (TOp[cellI] <= (t_cmf_K + 3.5 + ce)))
+                        ASHRAELevel80[cellI] = 1;
+
+                    if ((TOp[cellI] >= (t_cmf_K - 2.5)) && (TOp[cellI] <= (t_cmf_K + 2.5 + ce)))
+                        ASHRAELevel90[cellI] = 1;
+                }
+            }
+            else
+            {
+                scalar cellRH = RH;
+
+                if (humidityAvailable && humidityField.valid())
+                {
+                    scalar rawHumidity = humidityField()[cellI];
+                    cellRH = (rawHumidity <= 1.0) ? rawHumidity * 100.0 : rawHumidity;
+                    cellRH = Foam::max(0.0, Foam::min(100.0, cellRH));
                 }
 
-                //- Calculate neutral temperature for adaptive comfort model
-                //- CORRECTED: Use running mean outdoor temperature, not indoor temperature
-                t_cmf = (0.31 * T_rm_out) + 17.8;
-                
-                //- Convert to Kelvin for comparison with TOp
-                scalar t_cmf_K = t_cmf + 273.15;
-                
-                //- CORRECTED: Proper range checking for comfort zones
-                //- 80% acceptability: ±3.5K around neutral temperature + cooling effect
-                if ((TOp[cellI] >= (t_cmf_K - 3.5)) && (TOp[cellI] <= (t_cmf_K + 3.5 + ce)))
-                    ASHRAELevel80[cellI] = 1;
-                
-                //- 90% acceptability: ±2.5K around neutral temperature + cooling effect
-                if ((TOp[cellI] >= (t_cmf_K - 2.5)) && (TOp[cellI] <= (t_cmf_K + 2.5 + ce)))
-                    ASHRAELevel90[cellI] = 1;
+                scalar pmv = calculatePMV
+                (
+                    T[cellI],
+                    mag(U[cellI]),
+                    cellRH,
+                    STemp,
+                    met * Foam::ASHRAE55Constants::baseMetabolicRate,
+                    clo,
+                    wme * Foam::ASHRAE55Constants::baseMetabolicRate
+                );
+
+                PMV[cellI] = pmv;
+                PPD[cellI] = calculatePPD(pmv);
+
+                if (pmv >= -0.5 && pmv <= 0.5)
+                {
+                    ASHRAEAcceptable[cellI] = 1;
+                }
+
+                averageRHUsed += cellRH;
             }
         }
 
-        // Display detailed comfort statistics
-        displayComfortStatistics(ASHRAELevel80, ASHRAELevel90, TOp, T, U, T_rm_out);
+        if (modelName == "adaptive")
+        {
+            displayComfortStatistics(ASHRAELevel80, ASHRAELevel90, TOp, T, U, T_rm_out);
+            ASHRAELevel80.write();
+            ASHRAELevel90.write();
+        }
+        else
+        {
+            averageRHUsed =
+                (mesh.cells().size() > 0)
+              ? averageRHUsed / scalar(mesh.cells().size())
+              : RH;
+            displayPMVStatistics(ASHRAEAcceptable, PMV, PPD, TOp, T, U, averageRHUsed);
+            PMV.write();
+            PPD.write();
+            ASHRAEAcceptable.write();
+        }
 
-        ASHRAELevel80.write();
-        ASHRAELevel90.write();
+        TOp.write();
 
         Info << "Done" << endl;
     }

@@ -1,0 +1,27 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2412                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      ASHRAE55Dict;
+}
+
+// ASHRAE 55 evaluation model:
+// - adaptive: naturally ventilated adaptive comfort model
+// - pmv: PMV-based method for indoor conditioned spaces
+model       adaptive;
+
+// PMV-mode defaults. Command-line options override these values.
+met         1.2;
+clo         0.5;
+wme         0.0;
+RH          50;
+
+// ************************************************************************* //

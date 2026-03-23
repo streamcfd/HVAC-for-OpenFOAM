@@ -76,3 +76,48 @@
         "zeroGradient"
 	);
 
+    volScalarField PMV
+    (
+        IOobject
+        (
+            "PMV",
+            runTime.timeName(),
+            mesh,
+            IOobject::NO_READ,
+            IOobject::AUTO_WRITE
+        ),
+        mesh,
+        dimensionedScalar("PMV", dimensionSet(0,0,0,0,0,0,0), 0.0),
+        "zeroGradient"
+    );
+
+    volScalarField PPD
+    (
+        IOobject
+        (
+            "PPD",
+            runTime.timeName(),
+            mesh,
+            IOobject::NO_READ,
+            IOobject::AUTO_WRITE
+        ),
+        mesh,
+        dimensionedScalar("PPD", dimensionSet(0,0,0,0,0,0,0), 0.0),
+        "zeroGradient"
+    );
+
+    volScalarField ASHRAEAcceptable
+    (
+        IOobject
+        (
+            "ASHRAEAcceptable",
+            runTime.timeName(),
+            mesh,
+            IOobject::NO_READ,
+            IOobject::AUTO_WRITE
+        ),
+        mesh,
+        dimensionedScalar("ASHRAEAcceptable", dimensionSet(0,0,0,0,0,0,0), 0.0),
+        "zeroGradient"
+    );
+
