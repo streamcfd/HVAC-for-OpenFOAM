@@ -31,6 +31,9 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 - **ISO7933Foam**: ISO 7933 heat strain screening
 - **AoAFoam**: Age of Air calculation for ventilation assessment
 
+#### fvOptions
+- **thermostatSource**: Thermostat-controlled heating source with proportional regulation, sensor placement, and supply temperature limiting (Vorlauf)
+
 #### Boundary Conditions
 - **buildingElementBC**: Advanced thermal boundary condition for building walls with multi-layer support
 
@@ -52,6 +55,9 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 - [ASHRAE55Foam](ASHRAE55/README.md) - ASHRAE-55 adaptive comfort model
 - [ISO7243Foam](ISO7243/README.md) - ISO 7243 WBGT post-processing
 - [ISO7933Foam](ISO7933/README.md) - ISO 7933 heat strain screening
+
+### fvOptions
+- [thermostatSource](thermostatSource/README.md) - Thermostat-controlled heating with sensor and Vorlauf limit
 
 ### Boundary Conditions
 - [buildingElementBC](buildingElementBC/README.md) - Multi-layer wall boundary condition with radiation
