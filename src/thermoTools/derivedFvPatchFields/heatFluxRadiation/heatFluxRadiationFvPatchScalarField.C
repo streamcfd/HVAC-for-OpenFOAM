@@ -42,6 +42,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     mixedFvPatchScalarField(p, iF),
     temperatureCoupledBase(patch()),
     Q_(nullptr),
+    q_(nullptr),
     Cp_(0),
     mass_(0),
     relaxation_(1),
@@ -68,7 +69,8 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(ptf, p, iF, mapper),
     temperatureCoupledBase(patch(), ptf),
-    Q_(ptf.Q_.clone()),
+    Q_(ptf.Q_.valid() ? ptf.Q_.clone() : nullptr),
+    q_(ptf.q_.valid() ? ptf.q_.clone(patch().patch()) : nullptr),
     Cp_(ptf.Cp_),
     mass_(ptf.mass_),
     relaxation_(ptf.relaxation_),
@@ -96,7 +98,13 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(p, iF),
     temperatureCoupledBase(patch(), dict),
-    Q_(Function1<scalar>::New("Q", dict, &db())),
+    Q_(dict.found("Q") ? Function1<scalar>::New("Q", dict, &db()) : nullptr),
+    q_
+    (
+        dict.found("q")
+      ? PatchFunction1<scalar>::New(patch().patch(), "q", dict)
+      : nullptr
+    ),
     Cp_(dict.get<scalar>("Cp")),
     mass_(dict.get<scalar>("mass")),
     relaxation_(dict.getOrDefault<scalar>("relaxation", 1)),
@@ -107,6 +115,14 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     maxTemperature_(dict.getOrDefault<scalar>("maxTemperature", VGREAT)),
     curTimeIndex_(-1)
 {
+    if (!Q_.valid() && !q_.valid())
+    {
+        FatalIOErrorInFunction(dict)
+            << "Either Q [W] or q [W/m^2] must be provided for patch "
+            << p.name()
+            << exit(FatalIOError);
+    }
+
     if (Cp_ <= 0)
     {
         FatalIOErrorInFunction(dict)
@@ -156,7 +172,8 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(tppsf),
     temperatureCoupledBase(tppsf),
-    Q_(tppsf.Q_.clone()),
+    Q_(tppsf.Q_.valid() ? tppsf.Q_.clone() : nullptr),
+    q_(tppsf.q_.valid() ? tppsf.q_.clone(patch().patch()) : nullptr),
     Cp_(tppsf.Cp_),
     mass_(tppsf.mass_),
     relaxation_(tppsf.relaxation_),
@@ -177,7 +194,8 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(tppsf, iF),
     temperatureCoupledBase(patch(), tppsf),
-    Q_(tppsf.Q_.clone()),
+    Q_(tppsf.Q_.valid() ? tppsf.Q_.clone() : nullptr),
+    q_(tppsf.q_.valid() ? tppsf.q_.clone(patch().patch()) : nullptr),
     Cp_(tppsf.Cp_),
     mass_(tppsf.mass_),
     relaxation_(tppsf.relaxation_),
@@ -197,6 +215,11 @@ void heatFluxRadiationFvPatchScalarField::autoMap
 {
     mixedFvPatchScalarField::autoMap(mapper);
     temperatureCoupledBase::autoMap(mapper);
+
+    if (q_.valid())
+    {
+        q_->autoMap(mapper);
+    }
 
     if (qrName_ != "none")
     {
@@ -218,6 +241,11 @@ void heatFluxRadiationFvPatchScalarField::rmap
 
     temperatureCoupledBase::rmap(rhs, addr);
 
+    if (q_.valid())
+    {
+        q_->rmap(rhs.q_(), addr);
+    }
+
     if (qrName_ != "none")
     {
         qrPrevious_.rmap(rhs.qrPrevious_, addr);
@@ -236,6 +264,7 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
     const scalarField Tp0(Tp);
     const scalarField& magSf = patch().magSf();
     const scalar deltaT(db().time().deltaTValue());
+    const scalar t = this->db().time().timeOutputValue();
 
     tmp<scalarField> tkappa(kappa(Tp));
     const scalarField qConv(tkappa.ref()*snGrad());
@@ -254,7 +283,19 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
 
     const scalar QConv = gWeightedSum(magSf, qConv);
     const scalar QRad = gWeightedSum(magSf, qr);
-    const scalar QPrescribed = Q_->value(this->db().time().timeOutputValue());
+    scalar QPrescribed = Zero;
+
+    if (Q_.valid())
+    {
+        QPrescribed += Q_->value(t);
+    }
+
+    if (q_.valid())
+    {
+        tmp<scalarField> tqFlux(q_->value(t));
+        const scalarField& qFlux = tqFlux();
+        QPrescribed += gWeightedSum(magSf, qFlux);
+    }
 
     const scalar dTp =
         relaxation_*deltaT*(QPrescribed + QRad - QConv)/(mass_*Cp_);
@@ -302,7 +343,14 @@ void heatFluxRadiationFvPatchScalarField::write
     mixedFvPatchField<scalar>::write(os);
     temperatureCoupledBase::write(os);
 
-    Q_->writeData(os);
+    if (Q_.valid())
+    {
+        Q_->writeData(os);
+    }
+    if (q_.valid())
+    {
+        q_->writeData(os);
+    }
     os.writeEntry("Cp", Cp_);
     os.writeEntry("mass", mass_);
 

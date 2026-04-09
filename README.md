@@ -80,11 +80,12 @@ The patch currently adds:
 
 The model advances a single patch temperature from a lumped energy balance:
 
-`m Cp dT/dt = Q + Qrad - Qconv`
+`m Cp dT/dt = Q + integral(q dA) + Qrad - Qconv`
 
 with:
 
 - `Q`: prescribed total power input in W
+- `q`: optional prescribed heat flux in W/m^2
 - `Qrad`: integrated contribution from the optional `qr` field
 - `Qconv`: heat loss to the adjacent fluid based on the local patch gradient
 
@@ -104,6 +105,21 @@ person
     minTemperature  280;
     maxTemperature  320;
     value           uniform 304.15;
+}
+```
+
+For area-based cooling or heating loads, `q` can be prescribed directly:
+
+```foam
+floor
+{
+    type            heatFluxRadiation;
+    kappaMethod     fluidThermo;
+    q               uniform -20;
+    mass            500;
+    Cp              900;
+    qr              qr;
+    value           uniform 295.15;
 }
 ```
 

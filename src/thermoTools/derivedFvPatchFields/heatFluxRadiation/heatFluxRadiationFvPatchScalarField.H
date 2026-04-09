@@ -30,23 +30,26 @@ Group
     grpThermoBoundaryConditions grpWallBoundaryConditions
 
 Description
-    Lumped wall-temperature model with prescribed total power input and
-    optional radiative heat-flux coupling via \c qr.
+    Lumped wall-temperature model with prescribed total power input and/or
+    prescribed heat flux, plus optional radiative heat-flux coupling via
+    \c qr.
 
     The patch uses a single temperature value for the whole wall and updates it
     from the net power balance
 
-        m Cp dT/dt = Q + Qrad - Qconv
+        m Cp dT/dt = Q + integral(q dA) + Qrad - Qconv
 
-    where \c Q is a prescribed total power [W], \c Qrad is integrated from the
-    optional \c qr field, and \c Qconv is the conductive/convective heat loss to
-    the adjacent fluid obtained from the local temperature gradient.
+    where \c Q is a prescribed total power [W], \c q is an optional prescribed
+    heat flux [W/m^2], \c Qrad is integrated from the optional \c qr field, and
+    \c Qconv is the conductive/convective heat loss to the adjacent fluid
+    obtained from the local temperature gradient.
 
 Usage
     \table
         Property       | Description                         | Required | Default
         kappaMethod    | thermal conductivity option         | yes      |
-        Q              | Total power input [W]               | yes      |
+        Q              | Total power input [W]               | no       | none
+        q              | Heat flux input [W/m^2]             | no       | none
         Cp             | Heat capacity [J/kg/K]              | yes      |
         mass           | Total mass [kg]                     | yes      |
         qr             | Radiative flux field name           | no       | none
@@ -73,6 +76,20 @@ Usage
     }
     \endverbatim
 
+    A cooling floor can be specified directly with \c q:
+    \verbatim
+    floor
+    {
+        type            heatFluxRadiation;
+        kappaMethod     fluidThermo;
+        q               uniform -20;
+        mass            500;
+        Cp              900;
+        qr              qr;
+        value           uniform 295.15;
+    }
+    \endverbatim
+
 SourceFiles
     heatFluxRadiationFvPatchScalarField.C
 
@@ -84,6 +101,7 @@ SourceFiles
 #include "mixedFvPatchFields.H"
 #include "temperatureCoupledBase.H"
 #include "Function1.H"
+#include "PatchFunction1.H"
 
 namespace Foam
 {
@@ -97,6 +115,9 @@ class heatFluxRadiationFvPatchScalarField
 
         //- Prescribed total power [W]
         autoPtr<Function1<scalar>> Q_;
+
+        //- Prescribed heat flux [W/m^2]
+        autoPtr<PatchFunction1<scalar>> q_;
 
         //- Specific heat capacity [J/kg/K]
         scalar Cp_;
