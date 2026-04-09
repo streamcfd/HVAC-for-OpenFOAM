@@ -36,6 +36,7 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 
 #### Boundary Conditions
 - **buildingElementBC**: Advanced thermal boundary condition for building walls with multi-layer support
+- **heatFluxRadiation**: Lumped wall-temperature boundary condition with prescribed total power, optional `qr` coupling, and temperature limits for radiative HVAC loads
 
 #### Libraries
 - **humidityRhoThermo**: Thermophysical model extension for humidity calculations
@@ -61,6 +62,79 @@ Advanced HVAC simulation toolkit for OpenFOAM, providing specialized solvers and
 
 ### Boundary Conditions
 - [buildingElementBC](buildingElementBC/README.md) - Multi-layer wall boundary condition with radiation
+
+## Additional ThermoTools Patch Set
+
+This repository also contains an additional `thermoTools` patch tree at:
+
+- `src/thermoTools/`
+
+The patch currently adds:
+
+- `heatFluxRadiation`: a patch-temperature boundary condition for cases that need a prescribed total power (for example occupants or equipment) while allowing the surface temperature to react to convection and radiation
+- temperature guards for `externalWallHeatFluxTemperature` via the optional entries `minTemperature` and `maxTemperature`
+
+### `heatFluxRadiation`
+
+`heatFluxRadiation` is intended for single-region cases where `fixedValue` is too restrictive, but `externalWallHeatFluxTemperature` in `mode flux/power` with `kappaMethod fluidThermo` can drive the patch temperature to unphysical values.
+
+The model advances a single patch temperature from a lumped energy balance:
+
+`m Cp dT/dt = Q + Qrad - Qconv`
+
+with:
+
+- `Q`: prescribed total power input in W
+- `Qrad`: integrated contribution from the optional `qr` field
+- `Qconv`: heat loss to the adjacent fluid based on the local patch gradient
+
+Example:
+
+```foam
+person
+{
+    type            heatFluxRadiation;
+    kappaMethod     fluidThermo;
+    Q               constant 60;
+    mass            8;
+    Cp              3500;
+    qr              qr;
+    qrRelaxation    0.7;
+    relaxation      1.0;
+    minTemperature  280;
+    maxTemperature  320;
+    value           uniform 304.15;
+}
+```
+
+### Temperature Guards for `externalWallHeatFluxTemperature`
+
+`externalWallHeatFluxTemperature` now also supports:
+
+- `minTemperature`
+- `maxTemperature`
+
+These bounds are intended as a numerical safeguard when a strongly negative `qr` or a very small effective conductivity would otherwise drive the patch temperature below physically meaningful values.
+
+Example:
+
+```foam
+wall
+{
+    type            externalWallHeatFluxTemperature;
+    mode            flux;
+    qr              qr;
+    q               uniform 0;
+    qrRelaxation    0.7;
+    relaxation      1.0;
+    kappaMethod     function;
+    kappaValue      constant 0.2;
+    alphaValue      constant 1e-7;
+    minTemperature  250;
+    maxTemperature  350;
+    value           uniform 299.15;
+}
+```
 
 ## OpenFOAM-v2512 Patch Set
 
