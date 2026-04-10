@@ -32,16 +32,17 @@ Group
 Description
     Lumped wall-temperature model with prescribed total power input and/or
     prescribed heat flux, plus optional radiative heat-flux coupling via
-    \c qr.
+    \c qr and optional ambient coupling through \c h/\c Ta.
 
     The patch uses a single temperature value for the whole wall and updates it
     from the net power balance
 
-        m Cp dT/dt = Q + integral(q dA) + Qrad - Qconv
+        m Cp dT/dt = Q + integral(q dA) + Qrad + Qamb - Qconv
 
     where \c Q is a prescribed total power [W], \c q is an optional prescribed
-    heat flux [W/m^2], \c Qrad is integrated from the optional \c qr field, and
-    \c Qconv is the conductive/convective heat loss to the adjacent fluid
+    heat flux [W/m^2], \c Qrad is integrated from the optional \c qr field,
+    \c Qamb is an optional ambient heat exchange term based on \c h and \c Ta,
+    and \c Qconv is the conductive/convective heat loss to the adjacent fluid
     obtained from the local temperature gradient.
 
 Usage
@@ -50,6 +51,11 @@ Usage
         kappaMethod    | thermal conductivity option         | yes      |
         Q              | Total power input [W]               | no       | none
         q              | Heat flux input [W/m^2]             | no       | none
+        h              | Ambient heat transfer coefficient [W/m^2/K] | no | none
+        Ta             | Ambient temperature [K]             | no       | none
+        emissivity     | Emissivity for radiative exchange to ambient | no | 0
+        thicknessLayers | Optional layer thicknesses [m]     | no       | none
+        kappaLayers    | Optional layer conductivities [W/m/K] | no     | none
         Cp             | Heat capacity [J/kg/K]              | yes      |
         mass           | Total mass [kg]                     | yes      |
         qr             | Radiative flux field name           | no       | none
@@ -119,11 +125,20 @@ class heatFluxRadiationFvPatchScalarField
         //- Prescribed heat flux [W/m^2]
         autoPtr<PatchFunction1<scalar>> q_;
 
+        //- Optional ambient heat transfer coefficient [W/m^2/K]
+        autoPtr<PatchFunction1<scalar>> h_;
+
+        //- Optional ambient temperature [K]
+        autoPtr<Function1<scalar>> Ta_;
+
         //- Specific heat capacity [J/kg/K]
         scalar Cp_;
 
         //- Mass [kg]
         scalar mass_;
+
+        //- Optional surface emissivity for radiative transfer to ambient
+        scalar emissivity_;
 
         //- Relaxation for the patch temperature update
         scalar relaxation_;
@@ -142,6 +157,12 @@ class heatFluxRadiationFvPatchScalarField
 
         //- Optional upper patch-temperature bound
         scalar maxTemperature_;
+
+        //- Thickness of optional external layers
+        scalarList thicknessLayers_;
+
+        //- Conductivity of optional external layers
+        scalarList kappaLayers_;
 
         //- Current time index (used for updating)
         label curTimeIndex_;

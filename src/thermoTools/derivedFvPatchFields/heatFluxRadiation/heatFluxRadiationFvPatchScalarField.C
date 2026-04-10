@@ -29,6 +29,9 @@ License
 #include "addToRunTimeSelectionTable.H"
 #include "fvPatchFieldMapper.H"
 #include "volFields.H"
+#include "physicoChemicalConstants.H"
+
+using Foam::constant::physicoChemical::sigma;
 
 namespace Foam
 {
@@ -43,14 +46,19 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     temperatureCoupledBase(patch()),
     Q_(nullptr),
     q_(nullptr),
+    h_(nullptr),
+    Ta_(nullptr),
     Cp_(0),
     mass_(0),
+    emissivity_(0),
     relaxation_(1),
     qrPrevious_(),
     qrRelaxation_(1),
     qrName_("none"),
     minTemperature_(-VGREAT),
     maxTemperature_(VGREAT),
+    thicknessLayers_(),
+    kappaLayers_(),
     curTimeIndex_(-1)
 {
     refValue() = 0.0;
@@ -71,14 +79,19 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     temperatureCoupledBase(patch(), ptf),
     Q_(ptf.Q_.valid() ? ptf.Q_.clone() : nullptr),
     q_(ptf.q_.valid() ? ptf.q_.clone(patch().patch()) : nullptr),
+    h_(ptf.h_.valid() ? ptf.h_.clone(patch().patch()) : nullptr),
+    Ta_(ptf.Ta_.valid() ? ptf.Ta_.clone() : nullptr),
     Cp_(ptf.Cp_),
     mass_(ptf.mass_),
+    emissivity_(ptf.emissivity_),
     relaxation_(ptf.relaxation_),
     qrPrevious_(),
     qrRelaxation_(ptf.qrRelaxation_),
     qrName_(ptf.qrName_),
     minTemperature_(ptf.minTemperature_),
     maxTemperature_(ptf.maxTemperature_),
+    thicknessLayers_(ptf.thicknessLayers_),
+    kappaLayers_(ptf.kappaLayers_),
     curTimeIndex_(-1)
 {
     if (qrName_ != "none")
@@ -105,14 +118,24 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
       ? PatchFunction1<scalar>::New(patch().patch(), "q", dict)
       : nullptr
     ),
+    h_
+    (
+        dict.found("h")
+      ? PatchFunction1<scalar>::New(patch().patch(), "h", dict)
+      : nullptr
+    ),
+    Ta_(dict.found("Ta") ? Function1<scalar>::New("Ta", dict, &db()) : nullptr),
     Cp_(dict.get<scalar>("Cp")),
     mass_(dict.get<scalar>("mass")),
+    emissivity_(dict.getOrDefault<scalar>("emissivity", 0)),
     relaxation_(dict.getOrDefault<scalar>("relaxation", 1)),
     qrPrevious_(),
     qrRelaxation_(dict.getOrDefault<scalar>("qrRelaxation", 1)),
     qrName_(dict.getOrDefault<word>("qr", "none")),
     minTemperature_(dict.getOrDefault<scalar>("minTemperature", -VGREAT)),
     maxTemperature_(dict.getOrDefault<scalar>("maxTemperature", VGREAT)),
+    thicknessLayers_(),
+    kappaLayers_(),
     curTimeIndex_(-1)
 {
     if (!Q_.valid() && !q_.valid())
@@ -145,6 +168,35 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
             << exit(FatalIOError);
     }
 
+    if (h_.valid() != Ta_.valid())
+    {
+        FatalIOErrorInFunction(dict)
+            << "Both h [W/m^2/K] and Ta [K] must be provided together for "
+            << "patch " << p.name()
+            << exit(FatalIOError);
+    }
+
+    if (dict.readIfPresent("thicknessLayers", thicknessLayers_))
+    {
+        if (!h_.valid())
+        {
+            FatalIOErrorInFunction(dict)
+                << "thicknessLayers/kappaLayers require h and Ta for patch "
+                << p.name()
+                << exit(FatalIOError);
+        }
+
+        dict.readEntry("kappaLayers", kappaLayers_);
+
+        if (thicknessLayers_.size() != kappaLayers_.size())
+        {
+            FatalIOErrorInFunction(dict)
+                << "number of layers for thicknessLayers and kappaLayers "
+                << "must be the same for patch " << p.name()
+                << exit(FatalIOError);
+        }
+    }
+
     if (qrName_ != "none")
     {
         if (dict.found("qrPrevious"))
@@ -174,14 +226,19 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     temperatureCoupledBase(tppsf),
     Q_(tppsf.Q_.valid() ? tppsf.Q_.clone() : nullptr),
     q_(tppsf.q_.valid() ? tppsf.q_.clone(patch().patch()) : nullptr),
+    h_(tppsf.h_.valid() ? tppsf.h_.clone(patch().patch()) : nullptr),
+    Ta_(tppsf.Ta_.valid() ? tppsf.Ta_.clone() : nullptr),
     Cp_(tppsf.Cp_),
     mass_(tppsf.mass_),
+    emissivity_(tppsf.emissivity_),
     relaxation_(tppsf.relaxation_),
     qrPrevious_(tppsf.qrPrevious_),
     qrRelaxation_(tppsf.qrRelaxation_),
     qrName_(tppsf.qrName_),
     minTemperature_(tppsf.minTemperature_),
     maxTemperature_(tppsf.maxTemperature_),
+    thicknessLayers_(tppsf.thicknessLayers_),
+    kappaLayers_(tppsf.kappaLayers_),
     curTimeIndex_(-1)
 {}
 
@@ -196,14 +253,19 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     temperatureCoupledBase(patch(), tppsf),
     Q_(tppsf.Q_.valid() ? tppsf.Q_.clone() : nullptr),
     q_(tppsf.q_.valid() ? tppsf.q_.clone(patch().patch()) : nullptr),
+    h_(tppsf.h_.valid() ? tppsf.h_.clone(patch().patch()) : nullptr),
+    Ta_(tppsf.Ta_.valid() ? tppsf.Ta_.clone() : nullptr),
     Cp_(tppsf.Cp_),
     mass_(tppsf.mass_),
+    emissivity_(tppsf.emissivity_),
     relaxation_(tppsf.relaxation_),
     qrPrevious_(tppsf.qrPrevious_),
     qrRelaxation_(tppsf.qrRelaxation_),
     qrName_(tppsf.qrName_),
     minTemperature_(tppsf.minTemperature_),
     maxTemperature_(tppsf.maxTemperature_),
+    thicknessLayers_(tppsf.thicknessLayers_),
+    kappaLayers_(tppsf.kappaLayers_),
     curTimeIndex_(-1)
 {}
 
@@ -219,6 +281,11 @@ void heatFluxRadiationFvPatchScalarField::autoMap
     if (q_.valid())
     {
         q_->autoMap(mapper);
+    }
+
+    if (h_.valid())
+    {
+        h_->autoMap(mapper);
     }
 
     if (qrName_ != "none")
@@ -244,6 +311,11 @@ void heatFluxRadiationFvPatchScalarField::rmap
     if (q_.valid())
     {
         q_->rmap(rhs.q_(), addr);
+    }
+
+    if (h_.valid())
+    {
+        h_->rmap(rhs.h_(), addr);
     }
 
     if (qrName_ != "none")
@@ -283,6 +355,7 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
 
     const scalar QConv = gWeightedSum(magSf, qConv);
     const scalar QRad = gWeightedSum(magSf, qr);
+    scalar QAmbient = Zero;
     scalar QPrescribed = Zero;
 
     if (Q_.valid())
@@ -297,8 +370,85 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
         QPrescribed += gWeightedSum(magSf, qFlux);
     }
 
+    if (h_.valid())
+    {
+        tmp<scalarField> thtcCoeff(h_->value(t));
+        const scalarField& htcCoeff = thtcCoeff();
+        const scalar Ta = Ta_->value(t);
+
+        scalar totalSolidRes = 0;
+        if (thicknessLayers_.size())
+        {
+            forAll(thicknessLayers_, iLayer)
+            {
+                const scalar l = thicknessLayers_[iLayer];
+                if (kappaLayers_[iLayer] > 0)
+                {
+                    totalSolidRes += l/kappaLayers_[iLayer];
+                }
+            }
+        }
+
+        scalarField hrad(Tp.size(), Zero);
+        if (emissivity_ > 0)
+        {
+            const scalar eSig(emissivity_*sigma.value());
+
+            if (totalSolidRes > 0)
+            {
+                scalarField TpLambda(htcCoeff/(htcCoeff + 1/totalSolidRes));
+                scalarField Ts(TpLambda*Ta + (1 - TpLambda)*Tp);
+
+                hrad = eSig*((pow3(Ta) + pow3(Ts)) + Ta*Ts*(Ta + Ts));
+
+                forAll(hrad, i)
+                {
+                    scalar hradTmp0 = hrad[i];
+                    scalar TaLambda =
+                        (htcCoeff[i] + hradTmp0)
+                       /(htcCoeff[i] + hradTmp0 + 1/totalSolidRes);
+
+                    scalar TsiNew = TaLambda*Ta + (1 - TaLambda)*Tp[i];
+                    scalar Tsi = Ts[i];
+
+                    while (mag(Tsi - TsiNew)/max(Tsi, SMALL) > 0.01)
+                    {
+                        Tsi = TsiNew;
+                        scalar hradNew
+                        (
+                            eSig
+                           *(
+                                (pow3(Ta) + pow3(Tsi))
+                              + Ta*Tsi*(Ta + Tsi)
+                            )
+                        );
+
+                        TaLambda =
+                            (htcCoeff[i] + hradNew)
+                           /(htcCoeff[i] + hradNew + 1/totalSolidRes);
+
+                        TsiNew = TaLambda*Ta + (1 - TaLambda)*Tp[i];
+                    }
+
+                    hrad[i] =
+                        eSig*((pow3(Ta) + pow3(Tsi)) + Ta*Tsi*(Ta + Tsi));
+                }
+            }
+            else
+            {
+                hrad = eSig*((pow3(Ta) + pow3(Tp)) + Ta*Tp*(Ta + Tp));
+            }
+        }
+
+        const scalarField hp(1/(1/(htcCoeff + hrad) + totalSolidRes));
+        const scalarField qAmbient(hp*(Ta - Tp));
+
+        QAmbient = gWeightedSum(magSf, qAmbient);
+    }
+
     const scalar dTp =
-        relaxation_*deltaT*(QPrescribed + QRad - QConv)/(mass_*Cp_);
+        relaxation_*deltaT*(QPrescribed + QRad + QAmbient - QConv)
+       /(mass_*Cp_);
 
     Tp += dTp;
 
@@ -324,6 +474,7 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
             << " dT:" << gAverage(Tp - Tp0)
             << " Qprescribed [W]:" << QPrescribed
             << " Qrad [W]:" << QRad
+            << " Qambient [W]:" << QAmbient
             << " Qconv [W]:" << QConv
             << " wall temperature min:" << limits.min()
             << " max:" << limits.max()
@@ -350,6 +501,22 @@ void heatFluxRadiationFvPatchScalarField::write
     if (q_.valid())
     {
         q_->writeData(os);
+    }
+    if (h_.valid())
+    {
+        h_->writeData(os);
+        Ta_->writeData(os);
+
+        if (emissivity_ > 0)
+        {
+            os.writeEntry("emissivity", emissivity_);
+        }
+
+        if (thicknessLayers_.size())
+        {
+            thicknessLayers_.writeEntry("thicknessLayers", os);
+            kappaLayers_.writeEntry("kappaLayers", os);
+        }
     }
     os.writeEntry("Cp", Cp_);
     os.writeEntry("mass", mass_);
