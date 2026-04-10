@@ -1,0 +1,64 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      T;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform 293.15;
+
+boundaryField
+{
+    yLow
+    {
+        type            cyclic;
+    }
+
+    yHigh
+    {
+        type            cyclic;
+    }
+
+    zLow
+    {
+        type            cyclic;
+    }
+
+    zHigh
+    {
+        type            cyclic;
+    }
+
+    hot
+    {
+        type            fixedValue;
+        value           uniform 333.15;
+    }
+
+    cold
+    {
+        type            heatFluxRadiation;
+        kappaMethod     fluidThermo;
+        Q               constant 0;
+        mass            10;
+        Cp              1000;
+        qr              qr;
+        qrRelaxation    1.0;
+        relaxation      1.0;
+        value           uniform 293.15;
+    }
+}
+
+
+// ************************************************************************* //

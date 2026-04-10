@@ -123,6 +123,17 @@ floor
 }
 ```
 
+Validation cases for the boundary condition are provided under:
+
+- `src/thermoTools/derivedFvPatchFields/heatFluxRadiation/validation/prescribedQr`
+- `src/thermoTools/derivedFvPatchFields/heatFluxRadiation/validation/fvDOMParallelPlates`
+
+`prescribedQr` validates the pure `qr` source term against an exact
+first-step balance. `fvDOMParallelPlates` validates the coupled
+`fvDOM + heatFluxRadiation` response against the black parallel-plates
+solution, with the radiative flux appearing in time `1` and the patch
+temperature update in time `2`.
+
 ### Temperature Guards for `externalWallHeatFluxTemperature`
 
 `externalWallHeatFluxTemperature` now also supports:
