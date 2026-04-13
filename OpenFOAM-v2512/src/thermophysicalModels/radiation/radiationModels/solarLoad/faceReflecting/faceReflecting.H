@@ -106,6 +106,9 @@ class faceReflecting
         //- Map from triSurface Index to global
         labelList mapTriToGlobal_;
 
+        //- Distribution type used for the ray-search surface in parallel
+        const word distributionTypeName_;
+
 
     // Private members
 

@@ -1,0 +1,1103 @@
+--- a/parallel/distributed/distributedTriSurfaceMesh/distributedTriSurfaceMesh.H
++++ b/parallel/distributed/distributedTriSurfaceMesh/distributedTriSurfaceMesh.H
+@@ -169,19 +169,19 @@
+                 const point& end
+             );
+
+-            //- Split segment into subsegments overlapping the processor
++            //- Split segment into the subsegment overlapping a processor
+             //  bounding box.
+-            //void Foam::distributedTriSurfaceMesh::splitSegment
+-            //(
+-            //    const label segmentI,
+-            //    const point& start,
+-            //    const point& end,
+-            //    const treeBoundBox& bb,
+-            //
+-            //    DynamicList<segment>& allSegments,
+-            //    DynamicList<label>& allSegmentMap,
+-            //    DynamicList<label> sendMap
+-            //) const
++            void splitSegment
++            (
++                const label segmenti,
++                const point& start,
++                const point& end,
++                const treeBoundBox& bb,
++
++                DynamicList<segment>& allSegments,
++                DynamicList<label>& allSegmentMap,
++                DynamicList<label>& sendMap
++            ) const;
+
+             //- Distribute segments into overlapping processor
+             //  bounding boxes. Sort per processor.
+--- a/parallel/distributed/distributedTriSurfaceMesh/distributedTriSurfaceMesh.C
++++ b/parallel/distributed/distributedTriSurfaceMesh/distributedTriSurfaceMesh.C
+@@ -540,66 +540,54 @@
+ }
+
+
+-//void Foam::distributedTriSurfaceMesh::splitSegment
+-//(
+-//    const label segmenti,
+-//    const point& start,
+-//    const point& end,
+-//    const treeBoundBox& bb,
+-//
+-//    DynamicList<segment>& allSegments,
+-//    DynamicList<label>& allSegmentMap,
+-//    DynamicList<label> sendMap
+-//) const
+-//{
+-//    // Work points
+-//    point clipPt0, clipPt1;
+-//
+-//    if (bb.contains(start))
+-//    {
+-//        // start within, trim end to bb
+-//        bool clipped = bb.intersects(end, start, clipPt0);
+-//
+-//        if (clipped)
+-//        {
+-//            // segment from start to clippedStart passes
+-//            // through proc.
+-//            sendMap[proci].append(allSegments.size());
+-//            allSegmentMap.append(segmenti);
+-//            allSegments.append(segment(start, clipPt0));
+-//        }
+-//    }
+-//    else if (bb.contains(end))
+-//    {
+-//        // end within, trim start to bb
+-//        bool clipped = bb.intersects(start, end, clipPt0);
+-//
+-//        if (clipped)
+-//        {
+-//            sendMap[proci].append(allSegments.size());
+-//            allSegmentMap.append(segmenti);
+-//            allSegments.append(segment(clipPt0, end));
+-//        }
+-//    }
+-//    else
+-//    {
+-//        // trim both
+-//        bool clippedStart = bb.intersects(start, end, clipPt0);
+-//
+-//        if (clippedStart)
+-//        {
+-//            bool clippedEnd = bb.intersects(end, clipPt0, clipPt1);
+-//
+-//            if (clippedEnd)
+-//            {
+-//                // middle part of segment passes through proc.
+-//                sendMap[proci].append(allSegments.size());
+-//                allSegmentMap.append(segmenti);
+-//                allSegments.append(segment(clipPt0, clipPt1));
+-//            }
+-//        }
+-//    }
+-//}
++void Foam::distributedTriSurfaceMesh::splitSegment
++(
++    const label segmenti,
++    const point& start,
++    const point& end,
++    const treeBoundBox& bb,
++
++    DynamicList<segment>& allSegments,
++    DynamicList<label>& allSegmentMap,
++    DynamicList<label>& sendMap
++) const
++{
++    point clipPt0, clipPt1;
++
++    if (bb.contains(start))
++    {
++        if (bb.contains(end))
++        {
++            sendMap.append(allSegments.size());
++            allSegmentMap.append(segmenti);
++            allSegments.append(segment(start, end));
++        }
++        else if (bb.intersects(end, start, clipPt0))
++        {
++            sendMap.append(allSegments.size());
++            allSegmentMap.append(segmenti);
++            allSegments.append(segment(start, clipPt0));
++        }
++    }
++    else if (bb.contains(end))
++    {
++        if (bb.intersects(start, end, clipPt0))
++        {
++            sendMap.append(allSegments.size());
++            allSegmentMap.append(segmenti);
++            allSegments.append(segment(clipPt0, end));
++        }
++    }
++    else if (bb.intersects(start, end, clipPt0))
++    {
++        if (bb.intersects(end, clipPt0, clipPt1))
++        {
++            sendMap.append(allSegments.size());
++            allSegmentMap.append(segmenti);
++            allSegments.append(segment(clipPt0, clipPt1));
++        }
++    }
++}
+
+
+ void Foam::distributedTriSurfaceMesh::distributeSegment
+@@ -653,33 +641,16 @@
+         {
+             const treeBoundBox& bb = bbs[bbi];
+
+-            // Scheme a: any processor that intersects the segment gets
+-            // the whole segment.
+-
+-            // Intersection point
+-            point clipPt;
+-
+-            if (bb.intersects(start, end, clipPt))
+-            {
+-                sendMap[proci].append(allSegments.size());
+-                allSegmentMap.append(segmenti);
+-                allSegments.append(segment(start, end));
+-            }
+-
+-            // Alternative: any processor only gets clipped bit of
+-            // segment. This gives small problems with additional
+-            // truncation errors.
+-            //splitSegment
+-            //(
+-            //    segmenti,
+-            //    start,
+-            //    end,
+-            //    bb,
+-            //
+-            //    allSegments,
+-            //    allSegmentMap,
+-            //   sendMap[proci]
+-            //);
++            splitSegment
++            (
++                segmenti,
++                start,
++                end,
++                bb,
++                allSegments,
++                allSegmentMap,
++                sendMap[proci]
++            );
+         }
+     }
+ }
+@@ -704,7 +675,6 @@
+         // Since intersection test is quite expensive compared to memory
+         // allocation we use DynamicList to immediately store the segment
+         // in the correct bin.
+-
+         // Segments to test
+         DynamicList<segment> dynAllSegments(start.size());
+         // Original index of segment
+@@ -813,14 +783,13 @@
+         }
+     }
+
++    const label nLocalGlobal = returnReduce(nLocal, sumOp<label>());
++    const label nStartGlobal = returnReduce(start.size(), sumOp<label>());
+
+     if
+     (
+         decomposeUsingBbs_
+-     && (
+-            returnReduce(nLocal, sumOp<label>())
+-         == returnReduce(start.size(), sumOp<label>())
+-        )
++     && (nLocalGlobal == nStartGlobal)
+     )
+     {
+         // In decomposeUsingBbs_ mode we're guaranteed to have all the geometry
+@@ -854,11 +823,6 @@
+     const mapDistribute& map = mapPtr();
+
+     label nOldAllSegments = allSegments.size();
+-
+-
+-    // Exchange the segments
+-    // ~~~~~~~~~~~~~~~~~~~~~
+-
+     map.distribute(allSegments);
+
+
+@@ -4170,7 +4134,7 @@
+     {
+         findLine
+         (
+-            true,   // nearestIntersection
++            false,  // nearestIntersection
+             start,
+             end,
+             info
+--- a/thermophysicalModels/radiation/radiationModels/solarLoad/solarLoad.H
++++ b/thermophysicalModels/radiation/radiationModels/solarLoad/solarLoad.H
+@@ -83,6 +83,8 @@
+                    -->                                | bool  | no     | false
+       updateAbsorptivity | Flag to enable absorptivity updates        <!--
+                    -->                                | bool  | no     | false
++      faceShadingDistribution | Parallel surface distribution for ray <!--
++                   --> tracing (`frozen`, `distributed`, ...) | word | no | frozen
+     \endtable
+
+     The inherited entries are elaborated in:
+@@ -173,6 +175,9 @@
+         //- Include reflected rays from specular surfaces
+         bool useReflectedRays_;
+
++        //- Distribution type for parallel ray-search surfaces
++        word faceShadingDistribution_;
++
+         //- First iteration
+         bool firstIter_;
+
+@@ -183,7 +188,12 @@
+         void initialise(const dictionary&);
+
+         //- Update direct hit faces radiation
+-        void updateDirectHitRadiation(const labelList&, const labelHashSet&);
++        void updateDirectHitRadiation
++        (
++            const labelList&,
++            const scalarField&,
++            const labelHashSet&
++        );
+
+         //- Update reflected heat flux
+         void updateReflectedRays(const labelHashSet&);
+@@ -262,6 +272,12 @@
+                 return qprimaryRad_[bandI];
+             }
+
++            //- Return const access to the solar wall heat flux field
++            const volScalarField& qr() const noexcept
++            {
++                return qr_;
++            }
++
+             //- Return const reference to the solar calculator
+             virtual const solarCalculator& solarCalculatorRef() const;
+
+--- a/thermophysicalModels/radiation/radiationModels/solarLoad/solarLoad.C
++++ b/thermophysicalModels/radiation/radiationModels/solarLoad/solarLoad.C
+@@ -36,6 +36,7 @@
+ #include "mappedPatchBase.H"
+ #include "wallPolyPatch.H"
+ #include "constants.H"
++#include "distributedTriSurfaceMesh.H"
+
+ using namespace Foam::constant;
+
+@@ -122,7 +123,15 @@
+
+         if (!activeFaceZoneIds.size())
+         {
+-            hitFaces_.reset(new faceShading(mesh_, solarCalc_.direction()));
++            hitFaces_.reset
++            (
++                new faceShading
++                (
++                    mesh_,
++                    solarCalc_.direction(),
++                    faceShadingDistribution_
++                )
++            );
+         }
+         else
+         {
+@@ -133,7 +142,8 @@
+                     mesh_,
+                     faceShading::nonCoupledPatches(mesh_),
+                     activeFaceZoneIds,
+-                    solarCalc_.direction()
++                    solarCalc_.direction(),
++                    faceShadingDistribution_
+                 )
+             );
+         }
+@@ -197,6 +207,7 @@
+ void Foam::radiation::solarLoad::updateDirectHitRadiation
+ (
+     const labelList& hitFacesId,
++    const scalarField& hitFacesTransmissivity,
+     const labelHashSet& includeMappedPatchBasePatches
+ )
+ {
+@@ -217,6 +228,7 @@
+         forAll(hitFacesId, i)
+         {
+             const label facei = hitFacesId[i];
++            const scalar rayTau = hitFacesTransmissivity[i];
+             const label patchID = patches.whichPatch(facei);
+
+             if (patchID == -1)
+@@ -236,6 +248,7 @@
+             {
+                 qprimaryBf[patchID][localFaceI] +=
+                     (qPrim & n[localFaceI])
++                    * rayTau
+                     * spectralDistribution_[bandi]
+                     * absorptivity_[patchID][bandi]()[localFaceI];
+             }
+@@ -251,6 +264,7 @@
+
+                 Ru_[celli] +=
+                     (qPrim & sf[localFaceI])
++                  * rayTau
+                   * spectralDistribution_[bandi]
+                   * absorptivity_[patchID][bandi]()[localFaceI]
+                   / V[celli];
+@@ -407,6 +421,16 @@
+     coeffs.readIfPresent("wallCoupled", wallCoupled_);
+     coeffs.readIfPresent("updateAbsorptivity", updateAbsorptivity_);
+     coeffs.readEntry("useReflectedRays", useReflectedRays_);
++    faceShadingDistribution_ =
++        distributedTriSurfaceMesh::distributionTypeNames_
++        [
++            distributedTriSurfaceMesh::distributionTypeNames_.getOrDefault
++            (
++                "faceShadingDistribution",
++                coeffs,
++                distributedTriSurfaceMesh::FROZEN
++            )
++        ];
+
+     (void) updateHitFaces();
+ }
+@@ -755,6 +779,7 @@
+     wallCoupled_(false),
+     updateAbsorptivity_(false),
+     useReflectedRays_(false),
++    faceShadingDistribution_(),
+     firstIter_(true)
+ {
+     initialise(coeffs_);
+@@ -809,6 +834,7 @@
+     wallCoupled_(false),
+     updateAbsorptivity_(false),
+     useReflectedRays_(false),
++    faceShadingDistribution_(),
+     firstIter_(true)
+ {
+     initialise(dict);
+@@ -881,7 +907,14 @@
+
+         // Add direct hit radiation
+         const labelList& hitFacesId = hitFaces_->rayStartFaces();
+-        updateDirectHitRadiation(hitFacesId, includeMappedPatchBasePatches);
++        const scalarField& hitFacesTransmissivity =
++            hitFaces_->rayStartTransmissivity();
++        updateDirectHitRadiation
++        (
++            hitFacesId,
++            hitFacesTransmissivity,
++            includeMappedPatchBasePatches
++        );
+
+         // Add sky diffusive radiation
+         updateSkyDiffusiveRadiation
+--- a/thermophysicalModels/radiation/radiationModels/solarLoad/faceShading/faceShading.H
++++ b/thermophysicalModels/radiation/radiationModels/solarLoad/faceShading/faceShading.H
+@@ -32,7 +32,8 @@
+
+     faceShading uses the transmissivity value in the boundaryRadiationProperties
+     in order to evaluate which faces are "hit" by the "direction" vector.
+-    NOTE: Only transmissivity values of zero are considered for opaque walls.
++    Opaque faces (transmissivity = 0) are used as blockers. Direct-hit faces
++    can additionally include semi-transparent faces (transmissivity < 1).
+
+ SourceFiles
+     faceShading.C
+@@ -78,6 +79,12 @@
+         //- Faces directly hit by vector direction
+         labelList rayStartFaces_;
+
++        //- Ray transmissivity to each directly hit face
++        scalarField rayStartTransmissivity_;
++
++        //- Distribution type used for the ray-search surface in parallel
++        const word distributionTypeName_;
++
+
+     // Private Member Functions
+
+@@ -90,7 +97,8 @@
+         triSurface triangulate
+         (
+             const labelUList& faceIDs,
+-            const bitSet& flipMap
++            const bitSet& flipMap,
++            labelList* triToFace = nullptr
+         ) const;
+
+         //- Find opaque faces by looking at the radiation properties.
+@@ -101,6 +109,15 @@
+             const labelUList& zoneIDs
+         ) const;
+
++        //- Find faces that can absorb direct solar load
++        //  (i.e. not fully transparent).
++        bitSet selectPrimaryFaces
++        (
++            const radiation::boundaryRadiationProperties& boundaryRadiation,
++            const labelUList& patchIDs,
++            const labelUList& zoneIDs
++        ) const;
++
+         //- Pick up candidate faces that might be blocking visibility for
+         //  other faces:
+         //  - if transmissivity is 0
+@@ -147,7 +164,8 @@
+         faceShading
+         (
+             const fvMesh& mesh,
+-            const vector& dir
++            const vector& dir,
++            const word& distributionTypeName = "frozen"
+         );
+
+         //- Construct from mesh and vector to 'sun' and selected patches
+@@ -157,7 +175,8 @@
+             const fvMesh& mesh,
+             const labelList& patchIDs,
+             const labelList& zoneIDs,
+-            const vector& dir
++            const vector& dir,
++            const word& distributionTypeName = "frozen"
+         );
+
+
+@@ -187,6 +206,12 @@
+                 return rayStartFaces_;
+             }
+
++            //- Const access to rayStartTransmissivity
++            const scalarField& rayStartTransmissivity() const
++            {
++                return rayStartTransmissivity_;
++            }
++
+
+         //- Recalculate rayStartFaces using direction vector
+         void correct();
+--- a/thermophysicalModels/radiation/radiationModels/solarLoad/faceShading/faceShading.C
++++ b/thermophysicalModels/radiation/radiationModels/solarLoad/faceShading/faceShading.C
+@@ -42,17 +42,53 @@
+     defineTypeNameAndDebug(faceShading, 0);
+ }
+
++namespace
++{
++bool clipRayToBounds
++(
++    const Foam::treeBoundBox& globalBb,
++    const Foam::point& start,
++    const Foam::point& farEnd,
++    const Foam::vector& clipOffset,
++    Foam::point& end
++)
++{
++    Foam::point clipPt;
++
++    if (!globalBb.intersects(farEnd, start, clipPt))
++    {
++        return false;
++    }
++
++    end = clipPt + clipOffset;
++
++    return Foam::magSqr(end - start) > Foam::magSqr(clipOffset);
++}
++}
++
+ // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
+
+ void Foam::faceShading::calculate()
+ {
+     const auto& pbm = mesh_.boundaryMesh();
++    const radiation::boundaryRadiationProperties& boundaryRadiation =
++        radiation::boundaryRadiationProperties::New(mesh_);
+
+     const bitSet isOpaqueFace
+     (
+         selectOpaqueFaces
+         (
+-            radiation::boundaryRadiationProperties::New(mesh_),
++            boundaryRadiation,
++            patchIDs_,
++            zoneIDs_
++        )
++    );
++
++    const bitSet isPrimaryFace
++    (
++        selectPrimaryFaces
++        (
++            boundaryRadiation,
+             patchIDs_,
+             zoneIDs_
+         )
+@@ -60,13 +96,13 @@
+
+     // Find faces potentially hit by solar rays
+     //  - correct normal
+-    //  - transmissivity 0
++    //  - transmissivity < 1
+     labelList hitFacesIds;
+     bitSet hitFacesFlips;
+     selectFaces
+     (
+         true,   // use normal to do first filtering
+-        isOpaqueFace,
++        isPrimaryFace,
+         patchIDs_,
+         zoneIDs_,
+
+@@ -116,10 +152,7 @@
+     dict.add
+     (
+         "distributionType",
+-        distributedTriSurfaceMesh::distributionTypeNames_
+-        [
+-            distributedTriSurfaceMesh::FROZEN
+-        ]
++        distributionTypeName_
+     );
+     dict.add("mergeDistance", SMALL);
+
+@@ -138,11 +171,21 @@
+         dict
+     );
+
++    {
++        autoPtr<mapDistribute> faceMap;
++        autoPtr<mapDistribute> pointMap;
++        surfacesMesh.distribute(meshBb, true, faceMap, pointMap);
++    }
++
+     if (debug)
+     {
+         surfacesMesh.searchableSurface::write();
+     }
+
++    treeBoundBox globalRayBb(boundBox(mesh_.points(), true));
++    const scalar rayClipTol = max(SMALL, 1e-6*globalRayBb.mag());
++    globalRayBb.grow(rayClipTol);
++
+     const scalar maxBounding =
+         returnReduce(5.0*mesh_.bounds().mag(), maxOp<scalar>());
+
+@@ -159,19 +202,35 @@
+         const pointField& faceCentres = mesh_.faceCentres();
+
+         const vector d(direction_*maxBounding);
++        const vector clipOffset =
++            -direction_/(mag(direction_) + VSMALL)*rayClipTol;
+
+         forAll(hitFacesIds, i)
+         {
+             const label facei = hitFacesIds[i];
+             const point& fc = faceCentres[facei];
+
+-            start.append(fc - 0.001*d);
++            const point startPt(fc + clipOffset);
++            point endPt(fc - d);
++
++            // Fall back to the original long ray if clipping fails.
++            // Treating clip failures as "visible" can leak shadowed faces.
++            clipRayToBounds
++            (
++                globalRayBb,
++                startPt,
++                fc - d,
++                clipOffset,
++                endPt
++            );
++
++            start.append(startPt);
+             startIndex.append(facei);
+-            end.append(fc - d);
++            end.append(endPt);
+         }
+
+         List<pointIndexHit> hitInfo(startIndex.size());
+-        surfacesMesh.findLine(start, end, hitInfo);
++        surfacesMesh.findLineAny(start, end, hitInfo);
+
+         // Collect the rays which has 'only one not wall' obstacle between
+         // start and end.
+@@ -212,6 +271,193 @@
+         end.clear();
+     }
+
++    rayStartTransmissivity_.setSize(rayStartFaces_.size());
++    rayStartTransmissivity_ = scalar(1);
++
++    bitSet isTransFace(mesh_.nFaces(), false);
++    scalarField faceTransmissivity(mesh_.nFaces(), scalar(1));
++
++    for (const label patchi : patchIDs_)
++    {
++        const auto& pp = pbm[patchi];
++        const tmp<scalarField> tt = boundaryRadiation.transmissivity(patchi);
++        const scalarField& t = tt.cref();
++
++        forAll(t, i)
++        {
++            const scalar ti = max(min(t[i], scalar(1)), scalar(0));
++            const label meshFacei = i + pp.start();
++
++            faceTransmissivity[meshFacei] = ti;
++            isTransFace[meshFacei] = (ti > 0.0 && ti < 1.0);
++        }
++    }
++
++    const auto& fzs = mesh_.faceZones();
++    for (const label zonei : zoneIDs_)
++    {
++        const auto& fz = fzs[zonei];
++        const tmp<scalarField> tt = boundaryRadiation.zoneTransmissivity
++        (
++            zonei,
++            fz
++        );
++        const scalarField& t = tt.cref();
++
++        forAll(t, i)
++        {
++            const scalar ti = max(min(t[i], scalar(1)), scalar(0));
++            const label meshFacei = fz[i];
++
++            faceTransmissivity[meshFacei] = ti;
++            isTransFace[meshFacei] = (ti > 0.0 && ti < 1.0);
++        }
++    }
++
++    labelList transmissiveFacesIds;
++    bitSet transmissiveFacesFlips;
++    selectFaces
++    (
++        false,   // use normal to do first filtering
++        isTransFace,
++        patchIDs_,
++        zoneIDs_,
++
++        transmissiveFacesIds,
++        transmissiveFacesFlips
++    );
++
++    const label nTransmissiveFaces =
++        returnReduce(transmissiveFacesIds.size(), sumOp<label>());
++    const label nVisibleFaces = returnReduce(rayStartFaces_.size(), sumOp<label>());
++
++    if (nTransmissiveFaces && nVisibleFaces)
++    {
++        labelList triToFace;
++        const triSurface transmissiveSurface = triangulate
++        (
++            transmissiveFacesIds,
++            transmissiveFacesFlips,
++            &triToFace
++        );
++
++        distributedTriSurfaceMesh transmissiveSurfacesMesh
++        (
++            IOobject
++            (
++                "transmissiveSurface.stl",
++                mesh_.time().constant(),    // directory
++                "triSurface",               // instance
++                mesh_.time(),               // registry
++                IOobject::NO_READ,
++                IOobject::NO_WRITE
++            ),
++            transmissiveSurface,
++            dict
++        );
++
++        {
++            autoPtr<mapDistribute> faceMap;
++            autoPtr<mapDistribute> pointMap;
++            transmissiveSurfacesMesh.distribute(meshBb, true, faceMap, pointMap);
++
++            if (faceMap.valid())
++            {
++                faceMap().distribute(triToFace);
++            }
++        }
++
++        const pointField& faceCentres = mesh_.faceCentres();
++        const vector d(direction_*maxBounding);
++        const vector clipOffset =
++            -direction_/(mag(direction_) + VSMALL)*rayClipTol;
++
++        DynamicField<point> start(rayStartFaces_.size());
++        DynamicField<point> end(start.size());
++        DynamicList<label> rayIndex(start.size());
++
++        forAll(rayStartFaces_, i)
++        {
++            const label facei = rayStartFaces_[i];
++            const point& fc = faceCentres[facei];
++
++            const point startPt(fc + clipOffset);
++            point endPt(fc - d);
++
++            // Fall back to the original long ray if clipping fails so
++            // transmissive layers are still tracked correctly.
++            clipRayToBounds
++            (
++                globalRayBb,
++                startPt,
++                fc - d,
++                clipOffset,
++                endPt
++            );
++
++            start.append(startPt);
++            end.append(endPt);
++            rayIndex.append(i);
++        }
++
++        List<List<pointIndexHit>> allHitInfo(start.size());
++        transmissiveSurfacesMesh.findLineAll(start, end, allHitInfo);
++
++        DynamicList<pointIndexHit> flatHitInfo;
++        DynamicList<label> flatRayIndex;
++
++        forAll(allHitInfo, rayI)
++        {
++            for (const pointIndexHit& hit : allHitInfo[rayI])
++            {
++                if (hit.hit())
++                {
++                    flatHitInfo.append(hit);
++                    flatRayIndex.append(rayI);
++                }
++            }
++        }
++
++        const label nFlatHits = returnReduce(flatHitInfo.size(), sumOp<label>());
++
++        if (nFlatHits)
++        {
++            const List<pointIndexHit> flatHits(flatHitInfo);
++            const labelList flatRays(flatRayIndex);
++
++            labelList triangleIndex;
++            autoPtr<mapDistribute> mapPtr
++            (
++                transmissiveSurfacesMesh.localQueries
++                (
++                    flatHits,
++                    triangleIndex
++                )
++            );
++
++            const mapDistribute& map = mapPtr();
++
++            scalarField flatTransmissivity(triangleIndex.size(), scalar(1));
++            forAll(triangleIndex, i)
++            {
++                const label trii = triangleIndex[i];
++                if (trii >= 0)
++                {
++                    const label meshFacei = triToFace[trii];
++                    flatTransmissivity[i] = faceTransmissivity[meshFacei];
++                }
++            }
++
++            map.reverseDistribute(flatHits.size(), flatTransmissivity);
++
++            forAll(flatTransmissivity, i)
++            {
++                const label rayI = rayIndex[flatRays[i]];
++                rayStartTransmissivity_[rayI] *= flatTransmissivity[i];
++            }
++        }
++    }
++
+     if (debug)
+     {
+         auto thitFaces = surfaceScalarField::New
+@@ -250,7 +496,8 @@
+ Foam::triSurface Foam::faceShading::triangulate
+ (
+     const labelUList& faceIDs,
+-    const bitSet& flipMap
++    const bitSet& flipMap,
++    labelList* triToFace
+ ) const
+ {
+     if (faceIDs.size() != flipMap.size())
+@@ -310,7 +557,7 @@
+
+     // Storage for surfaceMesh. Size estimate.
+     DynamicList<labelledTri> triangles(2*faceIDs.size());
+-
++    DynamicList<label> dynTriToFace(2*faceIDs.size());
+     // Work array
+     faceList triFaces;
+
+@@ -336,6 +583,11 @@
+             {
+                 triangles.append(labelledTri(f[0], f[2], f[1], patchi));
+             }
++
++            if (triToFace)
++            {
++                dynTriToFace.append(facei);
++            }
+         }
+     }
+
+@@ -354,6 +606,12 @@
+     // Add patch names to surface
+     surface.patches().transfer(surfPatches);
+
++    if (triToFace)
++    {
++        dynTriToFace.shrink();
++        *triToFace = std::move(dynTriToFace);
++    }
++
+     return surface;
+ }
+
+@@ -407,6 +665,53 @@
+ }
+
+
++Foam::bitSet Foam::faceShading::selectPrimaryFaces
++(
++    const radiation::boundaryRadiationProperties& boundaryRadiation,
++    const labelUList& patchIDs,
++    const labelUList& zoneIDs
++) const
++{
++    const auto& pbm = mesh_.boundaryMesh();
++
++    bitSet isPrimaryFace(mesh_.nFaces(), false);
++
++    for (const label patchi : patchIDs)
++    {
++        const auto& pp = pbm[patchi];
++        tmp<scalarField> tt = boundaryRadiation.transmissivity(patchi);
++        const scalarField& t = tt.cref();
++
++        forAll(t, i)
++        {
++            const scalar ti = max(min(t[i], scalar(1)), scalar(0));
++            isPrimaryFace[i + pp.start()] = (ti < 1.0);
++        }
++    }
++
++    const auto& fzs = mesh_.faceZones();
++
++    for (const label zonei : zoneIDs)
++    {
++        const auto& fz = fzs[zonei];
++        tmp<scalarField> tt = boundaryRadiation.zoneTransmissivity
++        (
++            zonei,
++            fz
++        );
++        const scalarField& t = tt.cref();
++
++        forAll(t, i)
++        {
++            const scalar ti = max(min(t[i], scalar(1)), scalar(0));
++            isPrimaryFace[fz[i]] = (ti < 1.0);
++        }
++    }
++
++    return isPrimaryFace;
++}
++
++
+ void Foam::faceShading::selectFaces
+ (
+     const bool useNormal,
+@@ -507,14 +812,17 @@
+ Foam::faceShading::faceShading
+ (
+     const fvMesh& mesh,
+-    const vector& dir
++    const vector& dir,
++    const word& distributionTypeName
+ )
+ :
+     mesh_(mesh),
+     patchIDs_(nonCoupledPatches(mesh)),
+     zoneIDs_(0),
+     direction_(dir),
+-    rayStartFaces_(0)
++    rayStartFaces_(0),
++    rayStartTransmissivity_(0),
++    distributionTypeName_(distributionTypeName)
+ {
+     calculate();
+ }
+@@ -525,14 +833,17 @@
+     const fvMesh& mesh,
+     const labelList& patchIDs,
+     const labelList& zoneIDs,
+-    const vector& dir
++    const vector& dir,
++    const word& distributionTypeName
+ )
+ :
+     mesh_(mesh),
+     patchIDs_(patchIDs),
+     zoneIDs_(zoneIDs),
+     direction_(dir),
+-    rayStartFaces_(0)
++    rayStartFaces_(0),
++    rayStartTransmissivity_(0),
++    distributionTypeName_(distributionTypeName)
+ {
+     calculate();
+ }
+--- a/thermophysicalModels/radiation/radiationModels/solarLoad/faceReflecting/faceReflecting.H
++++ b/thermophysicalModels/radiation/radiationModels/solarLoad/faceReflecting/faceReflecting.H
+@@ -106,6 +106,9 @@
+         //- Map from triSurface Index to global
+         labelList mapTriToGlobal_;
+
++        //- Distribution type used for the ray-search surface in parallel
++        const word distributionTypeName_;
++
+
+     // Private members
+
+--- a/thermophysicalModels/radiation/radiationModels/solarLoad/faceReflecting/faceReflecting.C
++++ b/thermophysicalModels/radiation/radiationModels/solarLoad/faceReflecting/faceReflecting.C
+@@ -207,10 +207,7 @@
+     dict.add
+     (
+         "distributionType",
+-        distributedTriSurfaceMesh::distributionTypeNames_
+-        [
+-            distributedTriSurfaceMesh::FROZEN
+-        ]
++        distributionTypeName_
+     );
+     dict.add("mergeDistance", SMALL);
+
+@@ -240,6 +237,17 @@
+         )
+     );
+
++    {
++        autoPtr<mapDistribute> faceMap;
++        autoPtr<mapDistribute> pointMap;
++        surfacesMesh_().distribute(meshBb, true, faceMap, pointMap);
++
++        if (faceMap.valid())
++        {
++            faceMap().distribute(mapTriToGlobal_);
++        }
++    }
++
+     if (debug)
+     {
+         surfacesMesh_->searchableSurface::write();
+@@ -264,10 +272,12 @@
+     // faces
+     const vector sunDir = directHitFaces_.direction();
+     const labelList& directHits = directHitFaces_.rayStartFaces();
++    const scalarField& directHitTau = directHitFaces_.rayStartTransmissivity();
+
+     globalIndex globalNumbering(mesh_.nFaces());
+
+     Map<label> refFacesDirIndex;
++    Map<scalar> refFacesTransmissivity;
+     labelList refDisDirsIndex(nRay_, -1);
+
+     forAll(patches, patchI)
+@@ -318,6 +328,12 @@
+                         rayIndex
+                     );
+
++                    refFacesTransmissivity.insert
++                    (
++                        globalNumbering.toGlobal(globalID),
++                        directHitTau[directHits.find(globalID)]
++                    );
++
+                     nFaces++;
+                 }
+             }
+@@ -329,6 +345,7 @@
+
+     Pstream::listReduce(refDisDirsIndex, maxOp<label>());
+     Pstream::mapCombineReduce(refFacesDirIndex, minEqOp<label>());
++    Pstream::mapCombineReduce(refFacesTransmissivity, minEqOp<scalar>());
+
+     const scalar maxBounding =
+         returnReduce(5.0*mesh_.bounds().mag(), maxOp<scalar>());
+@@ -504,6 +521,7 @@
+                     (
+                         (
+                             mag(qPrim)
++                           *refFacesTransmissivity[refIndex[rayI]]
+                            *r[bandI][rayI]
+                            *spectralDistribution_[bandI]
+                            *a
+@@ -548,7 +566,19 @@
+     Nfs_(),
+     solarCalc_(solar),
+     includePatches_(),
+-    mapTriToGlobal_()
++    mapTriToGlobal_(),
++    distributionTypeName_
++    (
++        distributedTriSurfaceMesh::distributionTypeNames_
++        [
++            distributedTriSurfaceMesh::distributionTypeNames_.getOrDefault
++            (
++                "faceShadingDistribution",
++                dict,
++                distributedTriSurfaceMesh::FROZEN
++            )
++        ]
++    )
+ {
+     initialise(dict);
+ }
+--- a/thermophysicalModels/radiation/radiationModels/fvDOM/fvDOM/fvDOM.C
++++ b/thermophysicalModels/radiation/radiationModels/fvDOM/fvDOM/fvDOM.C
+@@ -710,6 +710,11 @@
+              - absorptionEmission_->ECont(j)()();
+     }
+
++    if (useSolarLoad_ && solarLoad_.valid())
++    {
++        Ru += solarLoad_->Ru()();
++    }
++
+     return tRu;
+ }
+
+@@ -738,6 +743,11 @@
+         qem_.boundaryFieldRef() += IRay_[rayI].qem().boundaryField();
+         qin_.boundaryFieldRef() += IRay_[rayI].qin().boundaryField();
+     }
++
++    if (useSolarLoad_ && solarLoad_.valid())
++    {
++        qr_.boundaryFieldRef() += solarLoad_->qr().boundaryField();
++    }
+ }
+ 
+ 

@@ -42,6 +42,30 @@ namespace Foam
     defineTypeNameAndDebug(faceShading, 0);
 }
 
+namespace
+{
+bool clipRayToBounds
+(
+    const Foam::treeBoundBox& globalBb,
+    const Foam::point& start,
+    const Foam::point& farEnd,
+    const Foam::vector& clipOffset,
+    Foam::point& end
+)
+{
+    Foam::point clipPt;
+
+    if (!globalBb.intersects(farEnd, start, clipPt))
+    {
+        return false;
+    }
+
+    end = clipPt + clipOffset;
+
+    return Foam::magSqr(end - start) > Foam::magSqr(clipOffset);
+}
+}
+
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
 
 void Foam::faceShading::calculate()
@@ -60,15 +84,25 @@ void Foam::faceShading::calculate()
         )
     );
 
+    const bitSet isPrimaryFace
+    (
+        selectPrimaryFaces
+        (
+            boundaryRadiation,
+            patchIDs_,
+            zoneIDs_
+        )
+    );
+
     // Find faces potentially hit by solar rays
     //  - correct normal
-    //  - transmissivity 0
+    //  - transmissivity < 1
     labelList hitFacesIds;
     bitSet hitFacesFlips;
     selectFaces
     (
         true,   // use normal to do first filtering
-        isOpaqueFace,
+        isPrimaryFace,
         patchIDs_,
         zoneIDs_,
 
@@ -118,10 +152,7 @@ void Foam::faceShading::calculate()
     dict.add
     (
         "distributionType",
-        distributedTriSurfaceMesh::distributionTypeNames_
-        [
-            distributedTriSurfaceMesh::FROZEN
-        ]
+        distributionTypeName_
     );
     dict.add("mergeDistance", SMALL);
 
@@ -140,10 +171,20 @@ void Foam::faceShading::calculate()
         dict
     );
 
+    {
+        autoPtr<mapDistribute> faceMap;
+        autoPtr<mapDistribute> pointMap;
+        surfacesMesh.distribute(meshBb, true, faceMap, pointMap);
+    }
+
     if (debug)
     {
         surfacesMesh.searchableSurface::write();
     }
+
+    treeBoundBox globalRayBb(boundBox(mesh_.points(), true));
+    const scalar rayClipTol = max(SMALL, 1e-6*globalRayBb.mag());
+    globalRayBb.grow(rayClipTol);
 
     const scalar maxBounding =
         returnReduce(5.0*mesh_.bounds().mag(), maxOp<scalar>());
@@ -161,19 +202,35 @@ void Foam::faceShading::calculate()
         const pointField& faceCentres = mesh_.faceCentres();
 
         const vector d(direction_*maxBounding);
+        const vector clipOffset =
+            -direction_/(mag(direction_) + VSMALL)*rayClipTol;
 
         forAll(hitFacesIds, i)
         {
             const label facei = hitFacesIds[i];
             const point& fc = faceCentres[facei];
 
-            start.append(fc - 0.001*d);
+            const point startPt(fc + clipOffset);
+            point endPt(fc - d);
+
+            // Fall back to the original long ray if clipping fails.
+            // Treating clip failures as "visible" can leak shadowed faces.
+            clipRayToBounds
+            (
+                globalRayBb,
+                startPt,
+                fc - d,
+                clipOffset,
+                endPt
+            );
+
+            start.append(startPt);
             startIndex.append(facei);
-            end.append(fc - d);
+            end.append(endPt);
         }
 
         List<pointIndexHit> hitInfo(startIndex.size());
-        surfacesMesh.findLine(start, end, hitInfo);
+        surfacesMesh.findLineAny(start, end, hitInfo);
 
         // Collect the rays which has 'only one not wall' obstacle between
         // start and end.
@@ -270,7 +327,11 @@ void Foam::faceShading::calculate()
         transmissiveFacesFlips
     );
 
-    if (transmissiveFacesIds.size() && rayStartFaces_.size())
+    const label nTransmissiveFaces =
+        returnReduce(transmissiveFacesIds.size(), sumOp<label>());
+    const label nVisibleFaces = returnReduce(rayStartFaces_.size(), sumOp<label>());
+
+    if (nTransmissiveFaces && nVisibleFaces)
     {
         labelList triToFace;
         const triSurface transmissiveSurface = triangulate
@@ -295,19 +356,48 @@ void Foam::faceShading::calculate()
             dict
         );
 
+        {
+            autoPtr<mapDistribute> faceMap;
+            autoPtr<mapDistribute> pointMap;
+            transmissiveSurfacesMesh.distribute(meshBb, true, faceMap, pointMap);
+
+            if (faceMap.valid())
+            {
+                faceMap().distribute(triToFace);
+            }
+        }
+
         const pointField& faceCentres = mesh_.faceCentres();
         const vector d(direction_*maxBounding);
+        const vector clipOffset =
+            -direction_/(mag(direction_) + VSMALL)*rayClipTol;
 
         DynamicField<point> start(rayStartFaces_.size());
         DynamicField<point> end(start.size());
+        DynamicList<label> rayIndex(start.size());
 
         forAll(rayStartFaces_, i)
         {
             const label facei = rayStartFaces_[i];
             const point& fc = faceCentres[facei];
 
-            start.append(fc - 0.001*d);
-            end.append(fc - d);
+            const point startPt(fc + clipOffset);
+            point endPt(fc - d);
+
+            // Fall back to the original long ray if clipping fails so
+            // transmissive layers are still tracked correctly.
+            clipRayToBounds
+            (
+                globalRayBb,
+                startPt,
+                fc - d,
+                clipOffset,
+                endPt
+            );
+
+            start.append(startPt);
+            end.append(endPt);
+            rayIndex.append(i);
         }
 
         List<List<pointIndexHit>> allHitInfo(start.size());
@@ -328,7 +418,9 @@ void Foam::faceShading::calculate()
             }
         }
 
-        if (flatHitInfo.size())
+        const label nFlatHits = returnReduce(flatHitInfo.size(), sumOp<label>());
+
+        if (nFlatHits)
         {
             const List<pointIndexHit> flatHits(flatHitInfo);
             const labelList flatRays(flatRayIndex);
@@ -360,7 +452,7 @@ void Foam::faceShading::calculate()
 
             forAll(flatTransmissivity, i)
             {
-                const label rayI = flatRays[i];
+                const label rayI = rayIndex[flatRays[i]];
                 rayStartTransmissivity_[rayI] *= flatTransmissivity[i];
             }
         }
@@ -466,7 +558,6 @@ Foam::triSurface Foam::faceShading::triangulate
     // Storage for surfaceMesh. Size estimate.
     DynamicList<labelledTri> triangles(2*faceIDs.size());
     DynamicList<label> dynTriToFace(2*faceIDs.size());
-
     // Work array
     faceList triFaces;
 
@@ -574,6 +665,53 @@ Foam::bitSet Foam::faceShading::selectOpaqueFaces
 }
 
 
+Foam::bitSet Foam::faceShading::selectPrimaryFaces
+(
+    const radiation::boundaryRadiationProperties& boundaryRadiation,
+    const labelUList& patchIDs,
+    const labelUList& zoneIDs
+) const
+{
+    const auto& pbm = mesh_.boundaryMesh();
+
+    bitSet isPrimaryFace(mesh_.nFaces(), false);
+
+    for (const label patchi : patchIDs)
+    {
+        const auto& pp = pbm[patchi];
+        tmp<scalarField> tt = boundaryRadiation.transmissivity(patchi);
+        const scalarField& t = tt.cref();
+
+        forAll(t, i)
+        {
+            const scalar ti = max(min(t[i], scalar(1)), scalar(0));
+            isPrimaryFace[i + pp.start()] = (ti < 1.0);
+        }
+    }
+
+    const auto& fzs = mesh_.faceZones();
+
+    for (const label zonei : zoneIDs)
+    {
+        const auto& fz = fzs[zonei];
+        tmp<scalarField> tt = boundaryRadiation.zoneTransmissivity
+        (
+            zonei,
+            fz
+        );
+        const scalarField& t = tt.cref();
+
+        forAll(t, i)
+        {
+            const scalar ti = max(min(t[i], scalar(1)), scalar(0));
+            isPrimaryFace[fz[i]] = (ti < 1.0);
+        }
+    }
+
+    return isPrimaryFace;
+}
+
+
 void Foam::faceShading::selectFaces
 (
     const bool useNormal,
@@ -674,7 +812,8 @@ void Foam::faceShading::writeRays
 Foam::faceShading::faceShading
 (
     const fvMesh& mesh,
-    const vector& dir
+    const vector& dir,
+    const word& distributionTypeName
 )
 :
     mesh_(mesh),
@@ -682,7 +821,8 @@ Foam::faceShading::faceShading
     zoneIDs_(0),
     direction_(dir),
     rayStartFaces_(0),
-    rayStartTransmissivity_(0)
+    rayStartTransmissivity_(0),
+    distributionTypeName_(distributionTypeName)
 {
     calculate();
 }
@@ -693,7 +833,8 @@ Foam::faceShading::faceShading
     const fvMesh& mesh,
     const labelList& patchIDs,
     const labelList& zoneIDs,
-    const vector& dir
+    const vector& dir,
+    const word& distributionTypeName
 )
 :
     mesh_(mesh),
@@ -701,7 +842,8 @@ Foam::faceShading::faceShading
     zoneIDs_(zoneIDs),
     direction_(dir),
     rayStartFaces_(0),
-    rayStartTransmissivity_(0)
+    rayStartTransmissivity_(0),
+    distributionTypeName_(distributionTypeName)
 {
     calculate();
 }

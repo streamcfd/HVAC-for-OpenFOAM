@@ -32,7 +32,8 @@ Description
 
     faceShading uses the transmissivity value in the boundaryRadiationProperties
     in order to evaluate which faces are "hit" by the "direction" vector.
-    NOTE: Only transmissivity values of zero are considered for opaque walls.
+    Opaque faces (transmissivity = 0) are used as blockers. Direct-hit faces
+    can additionally include semi-transparent faces (transmissivity < 1).
 
 SourceFiles
     faceShading.C
@@ -81,6 +82,9 @@ class faceShading
         //- Ray transmissivity to each directly hit face
         scalarField rayStartTransmissivity_;
 
+        //- Distribution type used for the ray-search surface in parallel
+        const word distributionTypeName_;
+
 
     // Private Member Functions
 
@@ -99,6 +103,15 @@ class faceShading
 
         //- Find opaque faces by looking at the radiation properties.
         bitSet selectOpaqueFaces
+        (
+            const radiation::boundaryRadiationProperties& boundaryRadiation,
+            const labelUList& patchIDs,
+            const labelUList& zoneIDs
+        ) const;
+
+        //- Find faces that can absorb direct solar load
+        //  (i.e. not fully transparent).
+        bitSet selectPrimaryFaces
         (
             const radiation::boundaryRadiationProperties& boundaryRadiation,
             const labelUList& patchIDs,
@@ -151,7 +164,8 @@ public:
         faceShading
         (
             const fvMesh& mesh,
-            const vector& dir
+            const vector& dir,
+            const word& distributionTypeName = "frozen"
         );
 
         //- Construct from mesh and vector to 'sun' and selected patches
@@ -161,7 +175,8 @@ public:
             const fvMesh& mesh,
             const labelList& patchIDs,
             const labelList& zoneIDs,
-            const vector& dir
+            const vector& dir,
+            const word& distributionTypeName = "frozen"
         );
 
 

@@ -36,6 +36,7 @@ License
 #include "mappedPatchBase.H"
 #include "wallPolyPatch.H"
 #include "constants.H"
+#include "distributedTriSurfaceMesh.H"
 
 using namespace Foam::constant;
 
@@ -122,7 +123,15 @@ bool Foam::radiation::solarLoad::updateHitFaces()
 
         if (!activeFaceZoneIds.size())
         {
-            hitFaces_.reset(new faceShading(mesh_, solarCalc_.direction()));
+            hitFaces_.reset
+            (
+                new faceShading
+                (
+                    mesh_,
+                    solarCalc_.direction(),
+                    faceShadingDistribution_
+                )
+            );
         }
         else
         {
@@ -133,7 +142,8 @@ bool Foam::radiation::solarLoad::updateHitFaces()
                     mesh_,
                     faceShading::nonCoupledPatches(mesh_),
                     activeFaceZoneIds,
-                    solarCalc_.direction()
+                    solarCalc_.direction(),
+                    faceShadingDistribution_
                 )
             );
         }
@@ -411,6 +421,16 @@ void Foam::radiation::solarLoad::initialise(const dictionary& coeffs)
     coeffs.readIfPresent("wallCoupled", wallCoupled_);
     coeffs.readIfPresent("updateAbsorptivity", updateAbsorptivity_);
     coeffs.readEntry("useReflectedRays", useReflectedRays_);
+    faceShadingDistribution_ =
+        distributedTriSurfaceMesh::distributionTypeNames_
+        [
+            distributedTriSurfaceMesh::distributionTypeNames_.getOrDefault
+            (
+                "faceShadingDistribution",
+                coeffs,
+                distributedTriSurfaceMesh::FROZEN
+            )
+        ];
 
     (void) updateHitFaces();
 }
@@ -759,6 +779,7 @@ Foam::radiation::solarLoad::solarLoad(const volScalarField& T)
     wallCoupled_(false),
     updateAbsorptivity_(false),
     useReflectedRays_(false),
+    faceShadingDistribution_(),
     firstIter_(true)
 {
     initialise(coeffs_);
@@ -813,6 +834,7 @@ Foam::radiation::solarLoad::solarLoad
     wallCoupled_(false),
     updateAbsorptivity_(false),
     useReflectedRays_(false),
+    faceShadingDistribution_(),
     firstIter_(true)
 {
     initialise(dict);

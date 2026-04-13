@@ -207,10 +207,7 @@ void Foam::faceReflecting::initialise(const dictionary& coeffs)
     dict.add
     (
         "distributionType",
-        distributedTriSurfaceMesh::distributionTypeNames_
-        [
-            distributedTriSurfaceMesh::FROZEN
-        ]
+        distributionTypeName_
     );
     dict.add("mergeDistance", SMALL);
 
@@ -239,6 +236,17 @@ void Foam::faceReflecting::initialise(const dictionary& coeffs)
             dict
         )
     );
+
+    {
+        autoPtr<mapDistribute> faceMap;
+        autoPtr<mapDistribute> pointMap;
+        surfacesMesh_().distribute(meshBb, true, faceMap, pointMap);
+
+        if (faceMap.valid())
+        {
+            faceMap().distribute(mapTriToGlobal_);
+        }
+    }
 
     if (debug)
     {
@@ -558,7 +566,19 @@ Foam::faceReflecting::faceReflecting
     Nfs_(),
     solarCalc_(solar),
     includePatches_(),
-    mapTriToGlobal_()
+    mapTriToGlobal_(),
+    distributionTypeName_
+    (
+        distributedTriSurfaceMesh::distributionTypeNames_
+        [
+            distributedTriSurfaceMesh::distributionTypeNames_.getOrDefault
+            (
+                "faceShadingDistribution",
+                dict,
+                distributedTriSurfaceMesh::FROZEN
+            )
+        ]
+    )
 {
     initialise(dict);
 }

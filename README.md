@@ -167,6 +167,7 @@ wall
 
 This repository contains a ready-to-copy patch tree for OpenFOAM v2512 at:
 
+- `OpenFOAM-v2512/src/parallel/distributed/distributedTriSurfaceMesh/`
 - `OpenFOAM-v2512/src/thermophysicalModels/radiation/`
 
 The patch extends solar radiation handling for partially transparent surfaces (`0 < t < 1`) by:
@@ -174,8 +175,9 @@ The patch extends solar radiation handling for partially transparent surfaces (`
 - enabling transmissivity from `transparent` boundary radiation properties
 - propagating ray transmissivity through `solarLoad` face shading
 - scaling direct and reflected solar load contributions consistently
+- clipping distributed ray-search segments to processor-local bounds
 
-To apply in an OpenFOAM-v2512 source tree, copy the matching files from this folder into the OpenFOAM source and rebuild the radiation libraries with `wmake`.
+To apply in an OpenFOAM-v2512 source tree, copy the matching files from this folder into the OpenFOAM source and rebuild the affected OpenFOAM libraries with `wmake`.
 
 ## Technical Details
 

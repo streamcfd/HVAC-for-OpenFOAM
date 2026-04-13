@@ -83,6 +83,8 @@ Usage
                    -->                                | bool  | no     | false
       updateAbsorptivity | Flag to enable absorptivity updates        <!--
                    -->                                | bool  | no     | false
+      faceShadingDistribution | Parallel surface distribution for ray <!--
+                   --> tracing (`frozen`, `distributed`, ...) | word | no | frozen
     \endtable
 
     The inherited entries are elaborated in:
@@ -172,6 +174,9 @@ class solarLoad
 
         //- Include reflected rays from specular surfaces
         bool useReflectedRays_;
+
+        //- Distribution type for parallel ray-search surfaces
+        word faceShadingDistribution_;
 
         //- First iteration
         bool firstIter_;
@@ -265,6 +270,12 @@ public:
             const volScalarField& qprimaryRad(const label bandI) const
             {
                 return qprimaryRad_[bandI];
+            }
+
+            //- Return const access to the solar wall heat flux field
+            const volScalarField& qr() const noexcept
+            {
+                return qr_;
             }
 
             //- Return const reference to the solar calculator
