@@ -44,6 +44,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(p, iF),
     temperatureCoupledBase(patch()),
+    mode_("legacy"),
     Q_(nullptr),
     q_(nullptr),
     h_(nullptr),
@@ -77,6 +78,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(ptf, p, iF, mapper),
     temperatureCoupledBase(patch(), ptf),
+    mode_(ptf.mode_),
     Q_(ptf.Q_.valid() ? ptf.Q_.clone() : nullptr),
     q_(ptf.q_.valid() ? ptf.q_.clone(patch().patch()) : nullptr),
     h_(ptf.h_.valid() ? ptf.h_.clone(patch().patch()) : nullptr),
@@ -111,6 +113,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(p, iF),
     temperatureCoupledBase(patch(), dict),
+    mode_(dict.getOrDefault<word>("mode", "legacy")),
     Q_(dict.found("Q") ? Function1<scalar>::New("Q", dict, &db()) : nullptr),
     q_
     (
@@ -138,10 +141,46 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     kappaLayers_(),
     curTimeIndex_(-1)
 {
-    if (!Q_.valid() && !q_.valid())
+    if
+    (
+        mode_ != "legacy"
+     && mode_ != "power"
+     && mode_ != "flux"
+     && mode_ != "coefficient"
+    )
+    {
+        FatalIOErrorInFunction(dict)
+            << "Unknown mode '" << mode_ << "' for patch " << p.name()
+            << ". Valid modes are power, flux, coefficient"
+            << exit(FatalIOError);
+    }
+
+    if (mode_ == "legacy" && !Q_.valid() && !q_.valid())
     {
         FatalIOErrorInFunction(dict)
             << "Either Q [W] or q [W/m^2] must be provided for patch "
+            << p.name()
+            << exit(FatalIOError);
+    }
+
+    if (mode_ == "power" && !Q_.valid())
+    {
+        FatalIOErrorInFunction(dict)
+            << "mode power requires Q [W] for patch " << p.name()
+            << exit(FatalIOError);
+    }
+
+    if (mode_ == "flux" && !q_.valid())
+    {
+        FatalIOErrorInFunction(dict)
+            << "mode flux requires q [W/m^2] for patch " << p.name()
+            << exit(FatalIOError);
+    }
+
+    if (mode_ == "coefficient" && (!h_.valid() || !Ta_.valid()))
+    {
+        FatalIOErrorInFunction(dict)
+            << "mode coefficient requires h [W/m^2/K] and Ta [K] for patch "
             << p.name()
             << exit(FatalIOError);
     }
@@ -224,6 +263,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(tppsf),
     temperatureCoupledBase(tppsf),
+    mode_(tppsf.mode_),
     Q_(tppsf.Q_.valid() ? tppsf.Q_.clone() : nullptr),
     q_(tppsf.q_.valid() ? tppsf.q_.clone(patch().patch()) : nullptr),
     h_(tppsf.h_.valid() ? tppsf.h_.clone(patch().patch()) : nullptr),
@@ -251,6 +291,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
 :
     mixedFvPatchScalarField(tppsf, iF),
     temperatureCoupledBase(patch(), tppsf),
+    mode_(tppsf.mode_),
     Q_(tppsf.Q_.valid() ? tppsf.Q_.clone() : nullptr),
     q_(tppsf.q_.valid() ? tppsf.q_.clone(patch().patch()) : nullptr),
     h_(tppsf.h_.valid() ? tppsf.h_.clone(patch().patch()) : nullptr),
@@ -358,12 +399,12 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
     scalar QAmbient = Zero;
     scalar QPrescribed = Zero;
 
-    if (Q_.valid())
+    if ((mode_ == "legacy" || mode_ == "power") && Q_.valid())
     {
         QPrescribed += Q_->value(t);
     }
 
-    if (q_.valid())
+    if ((mode_ == "legacy" || mode_ == "flux") && q_.valid())
     {
         tmp<scalarField> tqFlux(q_->value(t));
         const scalarField& qFlux = tqFlux();
@@ -494,11 +535,16 @@ void heatFluxRadiationFvPatchScalarField::write
     mixedFvPatchField<scalar>::write(os);
     temperatureCoupledBase::write(os);
 
-    if (Q_.valid())
+    if (mode_ != "legacy")
+    {
+        os.writeEntry("mode", mode_);
+    }
+
+    if ((mode_ == "legacy" || mode_ == "power") && Q_.valid())
     {
         Q_->writeData(os);
     }
-    if (q_.valid())
+    if ((mode_ == "legacy" || mode_ == "flux") && q_.valid())
     {
         q_->writeData(os);
     }

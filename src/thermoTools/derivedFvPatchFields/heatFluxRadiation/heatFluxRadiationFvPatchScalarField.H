@@ -48,11 +48,12 @@ Description
 Usage
     \table
         Property       | Description                         | Required | Default
+        mode           | Input mode: power, flux, coefficient | no      | legacy
         kappaMethod    | thermal conductivity option         | yes      |
-        Q              | Total power input [W]               | no       | none
-        q              | Heat flux input [W/m^2]             | no       | none
-        h              | Ambient heat transfer coefficient [W/m^2/K] | no | none
-        Ta             | Ambient temperature [K]             | no       | none
+        Q              | Total power input [W], required for mode power | conditional | none
+        q              | Heat flux input [W/m^2], required for mode flux | conditional | none
+        h              | Ambient heat transfer coefficient [W/m^2/K], required for mode coefficient | conditional | none
+        Ta             | Ambient temperature [K], required for mode coefficient | conditional | none
         emissivity     | Emissivity for radiative exchange to ambient | no | 0
         thicknessLayers | Optional layer thicknesses [m]     | no       | none
         kappaLayers    | Optional layer conductivities [W/m/K] | no     | none
@@ -70,6 +71,7 @@ Usage
     person
     {
         type            heatFluxRadiation;
+        mode            power;
         kappaMethod     fluidThermo;
         Q               constant 60;
         mass            8;
@@ -87,12 +89,29 @@ Usage
     floor
     {
         type            heatFluxRadiation;
+        mode            flux;
         kappaMethod     fluidThermo;
         q               uniform -20;
         mass            500;
         Cp              900;
         qr              qr;
         value           uniform 295.15;
+    }
+    \endverbatim
+
+    Ambient coupling without prescribed power or heat flux can be specified with
+    \c mode coefficient:
+    \verbatim
+    facade
+    {
+        type            heatFluxRadiation;
+        mode            coefficient;
+        kappaMethod     fluidThermo;
+        h               constant 5;
+        Ta              constant 293.15;
+        mass            500;
+        Cp              900;
+        value           uniform 293.15;
     }
     \endverbatim
 
@@ -118,6 +137,9 @@ class heatFluxRadiationFvPatchScalarField
     public temperatureCoupledBase
 {
     // Private data
+
+        //- Input mode: legacy, power, flux, coefficient
+        word mode_;
 
         //- Prescribed total power [W]
         autoPtr<Function1<scalar>> Q_;
