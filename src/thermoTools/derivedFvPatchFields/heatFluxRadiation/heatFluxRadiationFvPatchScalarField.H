@@ -58,7 +58,7 @@ Usage
         thicknessLayers | Optional layer thicknesses [m]     | no       | none
         kappaLayers    | Optional layer conductivities [W/m/K] | no     | none
         Cp             | Heat capacity [J/kg/K]              | yes      |
-        mass           | Total mass [kg]                     | yes      |
+        massPerArea    | Areal mass [kg/m^2]                 | yes      |
         qr             | Radiative flux field name           | no       | none
         qrRelaxation   | Relaxation for the radiative field  | no       | 1
         relaxation     | Relaxation for the temperature step | no       | 1
@@ -74,7 +74,7 @@ Usage
         mode            power;
         kappaMethod     fluidThermo;
         Q               constant 60;
-        mass            8;
+        massPerArea     50;
         Cp              3500;
         qr              qr;
         qrRelaxation    0.7;
@@ -92,7 +92,7 @@ Usage
         mode            flux;
         kappaMethod     fluidThermo;
         q               uniform -20;
-        mass            500;
+        massPerArea     720;
         Cp              900;
         qr              qr;
         value           uniform 295.15;
@@ -109,7 +109,7 @@ Usage
         kappaMethod     fluidThermo;
         h               constant 5;
         Ta              constant 293.15;
-        mass            500;
+        massPerArea     720;
         Cp              900;
         value           uniform 293.15;
     }
@@ -156,8 +156,8 @@ class heatFluxRadiationFvPatchScalarField
         //- Specific heat capacity [J/kg/K]
         scalar Cp_;
 
-        //- Mass [kg]
-        scalar mass_;
+        //- Areal mass [kg/m^2]
+        scalar massPerArea_;
 
         //- Optional surface emissivity for radiative transfer to ambient
         scalar emissivity_;

@@ -50,7 +50,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     h_(nullptr),
     Ta_(nullptr),
     Cp_(0),
-    mass_(0),
+    massPerArea_(0),
     emissivity_(0),
     relaxation_(1),
     qrPrevious_(),
@@ -84,7 +84,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     h_(ptf.h_.valid() ? ptf.h_.clone(patch().patch()) : nullptr),
     Ta_(ptf.Ta_.valid() ? ptf.Ta_.clone() : nullptr),
     Cp_(ptf.Cp_),
-    mass_(ptf.mass_),
+    massPerArea_(ptf.massPerArea_),
     emissivity_(ptf.emissivity_),
     relaxation_(ptf.relaxation_),
     qrPrevious_(),
@@ -129,7 +129,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     ),
     Ta_(dict.found("Ta") ? Function1<scalar>::New("Ta", dict, &db()) : nullptr),
     Cp_(dict.get<scalar>("Cp")),
-    mass_(dict.get<scalar>("mass")),
+    massPerArea_(dict.get<scalar>("massPerArea")),
     emissivity_(dict.getOrDefault<scalar>("emissivity", 0)),
     relaxation_(dict.getOrDefault<scalar>("relaxation", 1)),
     qrPrevious_(),
@@ -192,10 +192,10 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
             << exit(FatalIOError);
     }
 
-    if (mass_ <= 0)
+    if (massPerArea_ <= 0)
     {
         FatalIOErrorInFunction(dict)
-            << "mass must be > 0 for patch " << p.name()
+            << "massPerArea must be > 0 for patch " << p.name()
             << exit(FatalIOError);
     }
 
@@ -269,7 +269,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     h_(tppsf.h_.valid() ? tppsf.h_.clone(patch().patch()) : nullptr),
     Ta_(tppsf.Ta_.valid() ? tppsf.Ta_.clone() : nullptr),
     Cp_(tppsf.Cp_),
-    mass_(tppsf.mass_),
+    massPerArea_(tppsf.massPerArea_),
     emissivity_(tppsf.emissivity_),
     relaxation_(tppsf.relaxation_),
     qrPrevious_(tppsf.qrPrevious_),
@@ -297,7 +297,7 @@ heatFluxRadiationFvPatchScalarField::heatFluxRadiationFvPatchScalarField
     h_(tppsf.h_.valid() ? tppsf.h_.clone(patch().patch()) : nullptr),
     Ta_(tppsf.Ta_.valid() ? tppsf.Ta_.clone() : nullptr),
     Cp_(tppsf.Cp_),
-    mass_(tppsf.mass_),
+    massPerArea_(tppsf.massPerArea_),
     emissivity_(tppsf.emissivity_),
     relaxation_(tppsf.relaxation_),
     qrPrevious_(tppsf.qrPrevious_),
@@ -487,9 +487,10 @@ void heatFluxRadiationFvPatchScalarField::updateCoeffs()
         QAmbient = gWeightedSum(magSf, qAmbient);
     }
 
+    const scalar Asum = gSum(magSf);
     const scalar dTp =
         relaxation_*deltaT*(QPrescribed + QRad + QAmbient - QConv)
-       /(mass_*Cp_);
+       /(massPerArea_*Asum*Cp_);
 
     Tp += dTp;
 
@@ -565,7 +566,7 @@ void heatFluxRadiationFvPatchScalarField::write
         }
     }
     os.writeEntry("Cp", Cp_);
-    os.writeEntry("mass", mass_);
+    os.writeEntry("massPerArea", massPerArea_);
 
     if (relaxation_ < 1)
     {
